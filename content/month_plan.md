@@ -1,893 +1,713 @@
-# One month of LinkedIn posts
+# One month of LinkedIn posts (principal level)
 
-Posted one per day, never repeated.
+One per day, never repeated.
 
-## Day 1 — 2026-06-16 — Test Automation
+## Day 1 - 2026-06-17 - QA Ops: quality engineering as an internal platform
 
-**Stop Sleeping in Your Playwright Tests**
+**Paved Road, Not a Mandate**
 
-Most flaky Playwright tests I inherit are flaky because someone waits on the wrong thing. They sleep for a fixed time, or wait for an element to be visible, then assert on data that has not loaded yet.
+We ran our internal test platform as a paved road, not a required check, and that one call shaped two years of adoption.
 
-Here is the pattern I see over and over:
+The reflex when you centralize quality engineering is to build a gate. One blessed framework, one runner, one approved way to write a test, enforced by a branch protection rule. It diagrams beautifully. It dies on contact with twelve teams whose services each have a reason they are different, and most of those reasons hold up.
 
-  await page.click("text=Refresh")
-  await page.waitForTimeout(2000)
-  const total = await page.textContent(".cart-total")
-  expect(total).toBe("$240.00")
+So we set the opposite default. The platform owns the hard, boring, shared layer. The orchestrator. Flake quarantine that attributes a failure to the commit that introduced it, not the run that surfaced it. Test impact analysis off the dependency graph so a payments PR does not fan out across the whole grid. Hermetic preview environments via Testcontainers. A reporting plane that turns raw results into a per-suite p95 and a flake-rate budget that pages the owning team, not us, when it blows. Teams own their tests and assertions. We never review their test logic. We publish the contract and the SLOs.
 
-That waitForTimeout is a guess. On a fast CI run it wastes two seconds. On a slow one it fails because the network call took longer. Either way you learn nothing about the app.
+The cost is honest. A paved road means duplicate work, two teams solving the same fixture problem before either notices. Adoption runs slower because nobody is forced onto it. In return, when the platform improves (test impact analysis cut median PR feedback from 18 to 6 minutes the week it landed), every team inherits it with no migration project, and nobody routes around you.
 
-Instead, wait for the thing that proves the state is ready. Usually that is the network response, not a pixel on screen.
+The mandate optimizes for day-one consistency and rots into a shadow-CI problem by month nine, where the tests that actually gate releases live in a bash script no platform engineer can see or fix.
 
-  const refresh = page.waitForResponse(
-    r => r.url().includes("/api/cart") && r.status() === 200
-  )
-  await page.click("text=Refresh")
-  await refresh
-  await expect(page.locator(".cart-total")).toHaveText("$240.00")
+Internal platforms win on the same economics as public ones. Push the cost of the correct path below the cost of the workaround, and keep it there.
 
-Two things changed. I tie the wait to the request the click triggers, so the test moves on the moment the data is back. And toHaveText retries, instead of reading text once, so a late render does not lose the race.
-
-In a recent suite this removed most of the intermittent failures and trimmed a few minutes off the run, from deleting sleeps that padded for the slowest case.
-
-The rule I give my team is simple. Never sleep for time. Wait for a condition. If you cannot name the condition you are waiting for, you do not understand the step yet.
-
-Response waits do couple your test to API paths, so a route refactor can break them. I take that trade. A test that breaks loudly when the contract changes is worth more than one that passes by luck.
-
-#TestAutomation #Playwright #QualityEngineering #SDET #FlakyTests
+#QualityEngineering #PlatformEngineering #SDET #TestInfrastructure #DeveloperExperience
 
 ---
 
-## Day 2 — 2026-06-17 — SDET engineering
+## Day 2 - 2026-06-18 - AI for QA: LLM-assisted test generation, triage and self-healing
 
-**Why time.sleep() Is Killing Your Test Suite**
+**When green stops meaning passing**
 
-Most flaky test suites I have inherited share one root cause: someone reached for time.sleep() to make a test pass.
+The teams that took the most pain from LLM-assisted testing are the ones whose suites were already green and trusted.
 
-It works on their laptop. It works in the demo. Then CI runs on a loaded machine, the app takes 1.4 seconds instead of 0.8, and the test fails for reasons that have nothing to do with the product.
+The lesson shows up six months in. Generation, triage, and self-healing all quietly optimize for the test staying green, not for it still being able to fail for the right reason.
 
-The fix is not a bigger sleep. A bigger sleep makes the suite slower and hides the race a little longer. Wait for the actual condition you care about.
+Walk all three. The failure is the same shape.
 
-Selenium has explicit waits. Playwright has web-first assertions and auto-waiting built in. Use them.
+Generation. Ask an LLM to write pytest cases from a spec and you get assertions that mirror the implementation it can read, not the contract. The test passes on day one and never catches the regression it was meant to catch. The tell is coverage climbing while mutation score stays flat. Run mutmut or Stryker against the generated files. If killed-mutant rate on LLM-authored tests trails your hand-written baseline, you are piling up assertions that execute lines without constraining behavior.
 
-Before (Selenium):
+Triage. LLM-as-judge clustering works until it learns your team's habit of waving things through. Feed it last quarter's dispositions and it relabels a real defect as known-flaky because that cluster got muted before, with a 0.9 confidence score attached.
 
-    driver.find_element(By.ID, "submit").click()
-    time.sleep(3)
-    assert "Order placed" in driver.page_source
+Self-healing. The worst one. A locator heals from button.submit to the nearest match, the step goes green, and the element it clicks is wrong. Test passes. Journey broken. Nobody looks, because green.
 
-After:
+What works: budget it. Cap auto-heals per suite per week, require a visual or DOM-anchor assertion to survive the heal, route the rest to a human. Treat a heal as a quarantine event with attribution, not a fix. Gate generated tests on mutation score before they join the trusted set, not on whether they pass.
 
-    driver.find_element(By.ID, "submit").click()
-    WebDriverWait(driver, 10).until(
-        EC.text_to_be_present_in_element(
-            (By.CSS_SELECTOR, ".status"), "Order placed"
-        )
-    )
+Green is a measurement. The moment your tooling defends green for its own sake, your suite is decorative.
 
-The second version returns the moment the text appears, often in well under a second, and only fails if the condition never happens within the timeout. Faster and more honest.
+What is your heal-to-review ratio? If you cannot answer, it is too high.
 
-A few habits that have worked for me:
-
-- Wait on a specific element or state, never on the clock.
-- Set one sane global timeout and stop sprinkling magic numbers.
-- When a test is flaky, treat it as a real bug and read the trace before you retry it.
-- Quarantine, do not delete. A test you mute and forget is worse than no test.
-
-Retries have a place. They are a safety net, not a design. If your green build depends on the third attempt, you are shipping the race to production and not looking at it.
-
-Sleeps feel like progress because the bar turns green. They are debt with interest, and CI collects.
-
-#SDET #TestAutomation #QAEngineering #FlakyTests #Playwright
+#SDET #TestAutomation #QAEngineering #LLMTesting #MutationTesting
 
 ---
 
-## Day 3 — 2026-06-18 — QA automation strategy
+## Day 3 - 2026-06-19 - Testing LLM/AI systems: evals, non-determinism, prompt regression
 
-**Playwright vs Cypress: pick by your app boundary**
+**Relative scoring beats pass/fail for LLM eval**
 
-I have shipped suites in both Playwright and Cypress, and the choice usually comes down to one question: how much of your testing crosses a real browser boundary?
+We stopped grading our LLM features pass/fail and started grading score deltas against a frozen baseline. That one change cut the "is this regression real" argument from a day to ten minutes.
 
-Cypress runs inside the browser, in the same event loop as your app. The debugging experience is hard to beat. You get time-travel snapshots, the test reruns on save, and on failure you see the exact DOM state. For a single-page app with one origin, my team gets green suites fast.
+Every prompt change opens a PR. CI runs the eval suite (promptfoo orchestrating our own scorers) over a versioned golden set of roughly 400 cases. Cases are JSONL: input, rubric, and a tier (smoke, full, adversarial). The set lives in the repo and gets reviewed like code, because a silent edit to an expected output is the worst kind of test rot, invisible and self-justifying.
 
-The boundary is where it bites. Cypress historically struggled with multiple tabs, origins, and native browser events. cy.origin helped, but I have still spent afternoons working around an OAuth redirect or an iframe on another domain.
+We never assert string equality on free text. Temperature 0 and a pinned seed still drift token-level across model snapshots, so equality is a flake generator. We assert on extracted fields, on structural checks (JSON parses, citations resolve, no banned phrases), and on an LLM-as-judge score with a frozen judge model and rubric. The judge has its own regression suite scored against a few hundred human labels. A judge that drifts is a broken ruler, and most teams never check it.
 
-Playwright runs out of process and drives the browser over the DevTools protocol. That is why it handles things Cypress finds awkward:
+Scoring is relative and pairwise. We run candidate and baseline over the same cases and compare distributions, not absolutes, so a noisy judge cannot block a merge alone. A PR fails if mean score drops past a threshold, if any adversarial case flips pass to fail, or if p95 latency or cost per case regresses past budget. With 400 cases that is 400 comparisons, so we gate on a corrected significance test, not one bad row.
 
-- multiple tabs and origins in one test
-- real parallelism across workers on one machine
-- Chromium, Firefox, and WebKit from the same script
-- auto-waiting on actionability instead of arbitrary sleeps
+Failed cases link to a baseline vs candidate side by side, so triage is reading, not rerunning. We also sample production traffic weekly into the set, PII scrubbed, so it tracks how the product is used, not how we imagined it.
 
-A login I reuse everywhere looks like this in Playwright:
+What is in your golden set that production taught you, and your spec never would have?
 
-  const ctx = await browser.newContext({ storageState: 'auth.json' });
-  const page = await ctx.newPage();
-  await page.goto('/dashboard');
-  await expect(page.getByRole('heading', { name: 'Reports' })).toBeVisible();
-
-Saving storageState once and loading it per worker cut our auth overhead, since most tests skip the UI login.
-
-So my rule. Cypress when the app is one origin and the team values the inner-loop feel. Playwright when you have cross-origin flows, multiple engines, or you want parallelism without a dashboard. Pick the one whose constraints match your app, not the one with the louder launch.
-
-#QAAutomation #Playwright #Cypress #SDET #TestAutomation
+#LLMEval #AIQuality #TestingLLMs #PromptRegression #QualityEngineering
 
 ---
 
-## Day 4 — 2026-06-19 — Web scraping & data extraction
+## Day 4 - 2026-06-20 - AI-driven development: testing AI-written code and agentic workflows
 
-**The Scraper That Broke Without Throwing an Error**
+**Agent-written tests are not tests**
 
-The scraper that ran fine for eight months broke on a Tuesday, silently. No exceptions, no stack trace. It started writing rows where about 40 percent of the price fields were empty, and nobody noticed until a downstream report looked wrong three days later.
+Tests written by the agent that wrote the implementation are not tests. They are a second opinion from someone who already agreed with themselves.
 
-The site had not blocked us. They had moved one product attribute out of the server-rendered HTML and into a JSON blob loaded by a later XHR call. Our Scrapy spider still got HTTP 200, still found the product container, still matched most selectors. It just missed the field that now arrived separately.
+The practice I want to push back on: one agent emits foo() and test_foo() in a single pass, and a green suite becomes the merge signal. It is the default in agentic workflows now, and it raises the floor on line coverage while lowering the ceiling on what coverage proves.
 
-A scraper that returns data is not a scraper that returns correct data, and I had been treating them as the same.
+The failure mode is shared context. When one model writes the code and the assertions, both inherit the same misreading of the spec. If it decides an empty cart should throw, the code throws, the test asserts it throws, coverage hits 95 percent, and the behavior is wrong. The code passes because it does what the code does. The fix is an oracle that does not share the model's theory of the code.
 
-What I do now on every project:
+Property-based testing is the cheapest. Hypothesis or fast-check never ask the agent what foo() returns. They run thousands of inputs against invariants stated up front: encode then decode is identity, a total never goes negative. Shrinking returns the minimal counterexample.
 
-- Validate the shape, not only the response. I run records through Great Expectations (or a plain pydantic model) before they touch storage. Required fields, value ranges, sane row counts.
+Mutation testing is the audit. Point mutmut or Stryker at the agent's suite. If it flips a plus to a minus or deletes a branch and the tests still pass, the suite is theater. I would rather gate at 70 percent coverage and an 85 percent mutation score than 95 percent that survives nothing.
 
-- Alert on absence. If a field that is normally 98 percent populated drops below 90, the run fails loudly. Silent nulls cost me more than any 403 ever has.
+Provenance is the last lever. Generate the adversarial suite from the ticket in a separate session, blind to the diff.
 
-- Check the network tab first. Before I write a selector, I open the page in Playwright and watch what loads. Often the clean data sits in a JSON API the page calls anyway.
+The gate should stop asking whether the agent's tests passed and ask whether anything independent tried to prove it wrong and failed. If CI cannot tell a correct function from a confidently wrong one, the agent optimizes for the gate you built, not the behavior you wanted.
 
-- Pin a golden sample. I save a few HTML fixtures and assert my parser against them in CI with pytest. When the site changes, a test breaks instead of a dashboard.
-
-The hard part was never the requests. It is knowing the moment the page changed underneath you. A 403 tells you immediately. A moved field tells you nothing, and the silence is what hurts.
-
-I would rather have a scraper that crashes on bad data than one that quietly fills my warehouse with holes.
-
-#WebScraping #DataExtraction #Scrapy #Playwright #DataQuality
+#TestAutomation #SDET #MutationTesting #PropertyBasedTesting #AICodegen
 
 ---
 
-## Day 5 — 2026-06-20 — Using AI for QA Ops
+## Day 5 - 2026-06-21 - Flaky-test management at scale: detection, quarantine, attribution
 
-**Stop Generating Tests With AI. Triage Them Instead.**
+**Flaky tests are a reliability SLO, not a hygiene chore**
 
-Stop asking an LLM to generate your whole Playwright suite. Start using it to triage the failures you already have.
+A flaky test whose outcome is uncorrelated with the change under evaluation is a reliability signal for your test platform, not a hygiene chore. Run it with the error-budget mechanics you already apply to production services. Measure the right thing: not raw failure count, but the conditional probability of a different verdict on rerun of the same SHA.
 
-I tried the "write all my tests with AI" thing last year. The model produced 40 specs in an afternoon. Most looked plausible. About a third asserted on the wrong thing, a handful tested behavior the app did not have, and almost all of them used brittle selectors like text=Submit that broke the next sprint. Reviewing that pile took longer than writing the tests by hand. The generation was fast. The trust was not.
+Detection. Flake rate per test is flips / total-reruns over a trailing 14-day window. Run at least 2 reruns on the same SHA so a flip is observable, and store a four-state verdict (pass, fail, flake, infra), not red/green. Above 1 percent is a candidate, above 5 percent auto-quarantines.
 
-So I moved the AI to the other end of the pipeline.
+Quarantine. Move the test to a non-voting lane, never delete coverage. TTL of 10 working days, after which it is fixed or deleted, owned via CODEOWNERS, not the last committer. Cap the pool at 2 percent of the suite. Exceed the cap and the suite itself is the incident: new quarantines require deleting old ones first. Without a cap, quarantine becomes a landfill.
 
-Now in CI, when a Playwright run goes red, a small script collects the failing test name, the error, the last few network requests, and the trace, then asks Claude one question. Is this a real regression, a flaky timing issue, or a stale selector? It does not fix anything. It posts a one-line guess into the GitHub Actions summary and tags the likely owner.
+Attribution is where most teams undersell the tooling. Cluster failures by stack signature plus an embedding of the error message, then bucket into product bug, test bug, infra, data. An LLM-as-judge pass over the diff and failure log gives a first label and confidence score; route anything under 0.8 to a human. The metric that predicts pain is flake-induced rerun cost: CI minutes on reruns over total CI minutes, budgeted at 5 percent.
 
-That is the part where AI actually earns its place. Classification, not authorship.
+SLOs I hold the platform to: suite p95 wall-clock under 12 minutes, aggregate flake rate under 0.5 percent, false-block rate (red PRs that pass on rerun, no code change) under 2 percent per week. Burn the budget, freeze new tests until it recovers.
 
-A rough split of where it helps:
+Most teams stop at flake count. That tells you nothing about cost or trend. Rate, budget, and an enforced TTL do.
 
-- Failure triage: group 200 red runs into a few probable causes
-- Flake detection: spot the same test failing only on retry, then flag it
-- Selector drift: notice when locators stop matching after a UI change
-
-The judgment still lives with me. I read the trace before I believe the label. But sorting signal from noise across a noisy suite is exactly the boring work I was bad at staying consistent on, and the model is steady there in a way I am not at 5pm on a Friday.
-
-Generated tests feel productive. Triaged failures actually move the suite forward. If you only have budget for one AI experiment in QA this quarter, point it at your flake list, not your blank test files.
-
-#QAAutomation #SDET #Playwright #AIinTesting #TestOps
+#testing #sdet #flakytests #qualityengineering #cicd
 
 ---
 
-## Day 6 — 2026-06-21 — AI-driven development
+## Day 6 - 2026-06-22 - Test impact analysis and CI test selection
 
-**Measuring AI Coding Tools Without Fooling Yourself**
+**Coverage map plus an add-only LLM gate beats a static import graph**
 
-Most teams measuring AI coding tools count the wrong thing. They track lines accepted, or how many people "use Copilot weekly." That tells you adoption, not value. I care about whether the code that ships is good, and whether it costs less to get there.
+Test impact analysis works fine in the demo and rots in production, because the dependency graph it relies on stops matching reality the day someone loads a fixture by string name.
 
-Here is what I actually measure on my teams.
+Static import graphs miss everything resolved at runtime. A test that reads a flag through a service call, a fixture pulled by name, a config key consumed three layers down, an env var that flips a code path. The graph cannot see any of it, so you pick between trusting it and shipping the regression it could not predict, or running the full suite and paying the cost TIA was meant to remove.
 
-Change failure rate, split by origin. We tag PRs that were mostly AI-generated and compare their rollback and hotfix rate against human-written ones. If the AI bucket fails more often in production, the speed is fake. We are just moving the cost downstream to on-call.
+A better static graph does not fix this. A coverage-derived map plus an add-only LLM gate does.
 
-Review time per PR. AI makes it cheap to produce a 600-line diff. Someone still has to read it. If author time drops but reviewer time climbs, you have shifted work, not removed it. Track both sides.
+Build the per-test map from real execution, not imports. pytest with coverage.py contexts gives line-level attribution:
 
-Test signal, not test count. An AI will happily generate 40 pytest cases that all assert the function returns something. I look at mutation score (mutmut, Stryker) on AI-written tests, and whether they catch a deliberately seeded bug. A suite that goes green no matter what you break is worse than no suite.
+  coverage run --context=test -m pytest
+  coverage json
+  # contexts -> {source_file: [tests that touched it]}
 
-Escaped defects per feature. This is the number that survives the noise. Pull it from your bug tracker, attribute it to the change, and watch the trend over a quarter.
+If a test executed a line, it owns that line, regardless of how control got there. Dynamic dispatch, monkeypatch, importlib, all captured.
 
-A rough before/after I find believable:
+Then select candidates from the diff and run an LLM over the residual. Feed it the diff, the selected set, and the unselected tests with their covered files. Ask it to flag any unselected test whose behavior could shift: config keys, serialized formats, error strings asserted elsewhere, shared fixture mutation. It returns test ids with a confidence score, and you union back above a threshold.
 
-  author time per PR: 4h -> 2h
-  reviewer time per PR: 30m -> 50m
-  change failure rate: flat or slightly up
+The model only adds, never prunes. That asymmetry is the design. A wrong add costs a few CI minutes. A wrong skip costs an incident and a postmortem.
 
-That last line is the one to fix before you scale the rollout.
+Instrument it like an SLO. Track selection rate against escape rate (regressions the selected set missed, caught downstream). Escapes climbing means your threshold is too high or your map has gone stale.
 
-The honest trade-off is that good measurement is annoying. Tagging PRs and running mutation tests in CI costs you something. But if you cannot tell whether the tool is helping, you are paying for a feeling instead of a measured gain.
-
-#AIDrivenDevelopment #SoftwareTesting #EngineeringMetrics #QualityEngineering #DevProductivity
+#testimpactanalysis #sdet #cicd #testautomation #qaengineering
 
 ---
 
-## Day 7 — 2026-06-22 — CI/CD & test infrastructure
+## Day 7 - 2026-06-23 - Consumer-driven contract testing and API governance at scale
 
-**Flaky Tests Are a Budget Line Now**
+**When can-i-deploy lies**
 
-In 2026 the loudest CI/CD trend on my teams is not a new tool. Teams are finally treating flaky tests as a budget line instead of a vibe.
+A green can-i-deploy check shipped the outage. That sentence is the whole post-mortem.
 
-For years we tracked pass rate and called it a day. A pipeline at 95 percent green felt fine. Then someone measured our retries, and we found that maybe 1 in 12 failures was a real defect. The rest were timing races, shared state, and a Playwright locator that resolved before the network settled. We were paying for compute to rerun lies.
+We run Pact with a broker and can-i-deploy gating every provider deploy. A payments provider renamed a refund-status enum from "PARTIAL" to "PARTIALLY_REFUNDED". Every contract stayed green, can-i-deploy said go, and two consumers broke in production within the hour.
 
-What changed this year is that the data finally lives where engineers look. We write every test result, with duration and retry count, to a small store and query it in CI.
+The contracts were green because no consumer had a pact asserting on that enum value. Pact verifies the interactions consumers actually wrote, nothing more. If three teams own the refund consumer and none encoded the status field, the broker has nothing to check, so the provider stays free to change it. Absence of a contract reads as permission. That is the failure mode no diagram shows.
 
-  flaky_score = reruns_that_flipped / total_runs
+The shallow fix is "write more assertions." It does not hold across 200 services and it rots the day someone forgets. The real fix was to stop treating the broker as the source of truth for coverage.
 
-Anything above a threshold gets quarantined automatically, not deleted. A quarantined test still runs and still reports, but it cannot block a merge. The owner gets a ticket. That one rule did more for trust in the suite than any framework upgrade.
+What we changed:
 
-The trade-off is real. Quarantine becomes a graveyard if nobody reads the tickets, so we cap it. If quarantine holds more than 2 percent of tests, the build warns and someone has to clean house.
+  - Coverage gate. We diff the provider OpenAPI against the union of verified pacts and fail CI when a response field has zero consumer expectations. Uncovered fields become tracked governance debt, not silent trust.
 
-The other shift is moving assertions earlier. Contract tests with Pact catch a broken API shape in seconds, before a 9 minute end-to-end run ever spins up a browser. We run k6 smoke checks on every PR, not just before release.
+  - oasdiff as a hard gate in the provider pipeline. Narrowing an enum, tightening a type, or adding a required request field blocks the merge regardless of pact status.
 
-None of this is exotic. pytest gives you durations and JUnit XML for free. GitHub Actions can fail a job on a flaky-rate gate. The skill in 2026 is measuring the tests you already have and being honest about which ones deserve to block a deploy.
+  - Pending plus WIP pacts, so a new consumer expectation cannot fail the provider build before it is verified once. This killed the incentive to stop asserting just to keep the board green.
 
-How does your team decide a test has earned the right to fail the build?
+can-i-deploy answers "did I break a contract someone wrote." It does not answer "is this change safe." That gap is where your next incident lives. Govern the schema, not only the pacts.
 
-#TestAutomation #CICD #SDET #QAEngineering #FlakyTests
+What is your broker silently treating as safe right now.
 
----
-
-## Day 8 — 2026-06-23 — API & contract testing
-
-**A Contract Testing Checklist I Actually Run**
-
-Most "API tests" I inherit are really integration tests in disguise. They hit a live service, pass when the network is calm, and tell you nothing about whether the contract between two teams still holds. Last quarter a provider renamed a field from user_id to userId in a minor release. Every test stayed green. Three consumers broke in production.
-
-Here is the checklist I now run for any API I own or depend on.
-
-1. Write the schema down first. Capture request and response shape in OpenAPI or JSON Schema before you write the test. If you cannot describe it, you do not understand it yet.
-
-2. Validate against that schema in every test. In pytest with the requests library, assert the status code, then validate the body with jsonschema. A 200 with the wrong shape is still a failure.
-
-3. Separate fast from slow. Schema and contract checks run on every commit in GitHub Actions. Full end to end against a deployed environment runs nightly, not on every push.
-
-4. Add consumer-driven contracts where teams hand off. Pact lets the consumer publish what it actually reads. The provider verifies against that, so a renamed field fails the provider build instead of production.
-
-5. Test the unhappy path on purpose. 400, 401, 404, 422, and a malformed body. Most outages I have debugged were a 500 where someone expected a clean 4xx.
-
-Two of these have caught more real bugs than any UI suite I have written: schema validation on every response, and consumer-driven contracts at team boundaries. Start there. The rest can wait a sprint.
-
-What does your team verify, the response code or the actual shape?
-
-#APITesting #ContractTesting #TestAutomation #QAEngineering #Pact
+#ContractTesting #Pact #APIGovernance #SDET #TestArchitecture
 
 ---
 
-## Day 9 — 2026-06-24 — Test Automation
+## Day 8 - 2026-06-24 - Resilient web scraping and data-extraction pipelines (anti-bot, LLM fallback)
 
-**The Flaky Test Was a Real Race Condition**
+**Resilient Scraping in 2026**
 
-A test failed on CI about one run in twenty. Passed locally every single time. The kind of failure people retry until it goes green and forget about.
+Most scraping teams in 2026 still budget engineering time for bypassing Cloudflare. The harder problem is per-record trust: deciding whether the thing you just parsed is actually correct before it lands in the warehouse.
 
-I stopped retrying and started logging. A retry that passes is not a fix, it is a deferral.
+Detection moved from static fingerprints to behavioral and network scoring. Residential pools that passed last quarter get flagged when ASN reputation shifts, and a JA4 TLS fingerprint that contradicts your claimed User-Agent is an instant block. The mitigations are known: patched browser runtimes under Playwright, fingerprint coherence held constant across a session, action timing that does not look scripted. What people underprice is that these sessions are slow and metered, so re-fetching pages you already parsed is pure waste.
 
-The test signed up a user, then asserted the welcome email landed in a fake inbox. Most runs the email was there. Sometimes it was not. Same code, same data.
+That cost model is why the LLM-fallback pattern gets built wrong. "Let the model read the HTML" turns into a spend and non-determinism problem at volume. The version that holds: deterministic extractors first (CSS, XPath, regex for stable shapes), each emitting a calibrated confidence score, and only the low-confidence tail routed to a cheap model pinned to a strict JSON schema. That tail should be single-digit percent. If it is 40 percent, your confidence signal is miscalibrated, not your parser.
 
-The bug was a race. The signup endpoint returned 201 before the email job was enqueued, and the email went out a few milliseconds later. My laptop was slow enough that the assert always lost the race. CI was faster, so sometimes the assert ran first and saw an empty inbox.
+Two failure modes get skipped. Schema drift is silent: the selector still matches, the field shifted one column, and a null check passes because you only asserted "got a string." You want value-level expectations (Great Expectations or Pydantic with range, enum, and format constraints), enforced before persistence. And the fallback needs its own regression suite. Pin a golden set of the genuinely hard pages, run promptfoo or DeepEval on every prompt or model change, and alert on extraction-rate regression.
 
-The tempting "fix" is a sleep:
+The pipeline that survives a redesign is idempotent, keyed on content hash, and treats low confidence as a first-class branch, not a caught exception. The model is the exception path, never the default.
 
-    time.sleep(2)
-    assert inbox.count() == 1
+Where is your confidence threshold set, and do you measure fallback cost per thousand records?
 
-That hides the race behind a magic number, slows the suite for everyone, and still flakes the day CI gets busy.
-
-What I did instead was poll for the real condition with a bound:
-
-    def wait_for(predicate, timeout=5, interval=0.05):
-        end = time.monotonic() + timeout
-        while time.monotonic() < end:
-            if predicate():
-                return True
-            time.sleep(interval)
-        return False
-
-    assert wait_for(lambda: inbox.count() == 1)
-
-Same idea as Playwright auto-waiting. You wait for the state you care about, not for a clock.
-
-Two things helped me find it faster:
-- Run the test in a loop with pytest-repeat until it fails, instead of hoping CI reproduces it.
-- Log timestamps on the request and the side effect. The gap was obvious once I could see it.
-
-Flaky tests usually tell you something true about timing or shared state. This one was a real bug a user could hit during a traffic spike.
-
-#TestAutomation #FlakyTests #SDET #QualityEngineering #Pytest
+#WebScraping #DataEngineering #SDET #DataQuality #LLMOps
 
 ---
 
-## Day 10 — 2026-06-25 — SDET engineering
+## Day 9 - 2026-06-25 - Performance, load and chaos/resilience testing
 
-**Scaling a test suite without losing speed**
+**Your load tool is lying about the tail**
 
-Our end-to-end suite went from 40 tests that ran in 4 minutes to about 1,800 that run in under 10. The hard part was never writing more tests. It was keeping them fast and trustworthy as the count grew.
+k6 and Gatling both claim high RPS from one box. The number nobody prints in the README is what the load generator does once the target starts to fail.
 
-A few changes did most of the work.
+Most generators schedule closed-loop: a fixed pool of virtual users fires, waits for the response, then fires again. When the system under test slows, your VUs slow with it. You think you held 50k RPS, but you backed off the moment latency rose, so you never measured the overload you came for. That is coordinated omission, and it deletes the tail.
 
-We killed the shared test database first. Every test that mutated global state was a landmine once we turned on parallelism. We moved to a fixture that spins up an isolated schema per worker (pytest-xdist with a per-worker Postgres schema), and the same tests that flaked at 8 workers passed at 32.
+Gatling and Locust default to closed-loop. k6 added arrival-rate executors (constant-arrival-rate, ramping-arrival-rate) that decouple request issuance from response timing, so it keeps firing at the target rate while the server drowns. Reach for open-loop when you characterize a breaking point. Vegeta still asserts a flat arrival rate from CI more cleanly than anything.
 
-Then we stopped using sleeps. A grep for time.sleep in the repo returned more results than I want to admit. In Playwright we replaced them with web-first assertions:
+The comparison also hides where percentiles get computed. Aggregating p99 per worker and averaging across workers is meaningless, because quantiles do not average. You want raw latency as an HDRHistogram, or k6 streaming to Prometheus, merged before any quantile is taken. Otherwise the dashboard lies worst at the tail you defend.
 
-    # before
-    click("#save")
-    time.sleep(2)
-    assert visible("#toast")
+For resilience the load tool is half the rig. Pair it with fault injection during the test: Toxiproxy for L4 latency and partitions, or a service-mesh fault filter for L7 aborts and delays. The result that matters is not "it handled 50k RPS." It is what p99.9 and the error budget did the moment you added 200ms of jitter to the database hop, and how fast they recovered. Encode that as the pass condition, not the throughput number.
 
-    # after
-    page.click("#save")
-    expect(page.locator("#toast")).to_be_visible()
+Run the load test and the chaos experiment as one. Steady-state load with no fault is a benchmark, and a benchmark predicts nothing about an incident.
 
-The second version waits only as long as it needs to, and it fails fast with a real reason.
-
-Last, we split the suite by purpose instead of by folder. A small set of API-level tests (requests plus a few Pact contracts) covers most of the logic. The browser tests cover the handful of flows a user actually walks through. That ratio is what keeps wall-clock time down, because UI tests are the expensive ones.
-
-The trade-off is honest. Per-worker isolation costs setup time, and you pay for more CI runners. We decided a 10-minute signal that engineers trust beats a 4-minute signal they learned to ignore.
-
-If your suite is getting slower than your features, look at state and sleeps before you blame the test count.
-
-#SDET #TestAutomation #Playwright #CICD #QualityEngineering
+#performancetesting #loadtesting #chaosengineering #sdet #resilience
 
 ---
 
-## Day 11 — 2026-06-26 — QA automation strategy
+## Day 10 - 2026-06-26 - Test data management and ephemeral environments
 
-**Stop Waiting On The Clock In Your E2E Tests**
+**Test Data at Scale**
 
-Most flaky Playwright and Cypress tests I see are not flaky because of the browser. They are flaky because the test waits on a clock instead of a condition.
+What kills ephemeral environments at scale is the test data layer, and the failure mode changes shape three times as you grow.
 
-I went through our suite last quarter and the pattern was almost always the same. Someone hit a timing bug, dropped in a sleep, the test went green, and it sat in the codebase for a year. Then it failed once a week in CI for no obvious reason, and everyone learned to just re-run the job.
+At ten environments a day, you seed from fixtures or a small SQL dump. Fast, deterministic, nobody notices the cracks.
 
-Here is the shape of the problem in Playwright:
+At a few hundred a day, the dump is the bottleneck. A 40GB restore on every PR preview is dead time your engineers pay for. The usual fix is a golden snapshot with copy-on-write clones (ZFS, Postgres template databases, or Neon and PlanetScale branching). Provision drops from minutes to seconds because you stopped copying bytes and started copying references.
 
-  await page.click("#submit")
-  await page.waitForTimeout(2000)
-  expect(await page.isVisible("#result")).toBe(true)
+Cloning a frozen snapshot creates a quieter problem. The data ages. Your golden DB was captured in Q1, your migrations moved on, and tests now pass against a schema that no longer exists in prod. Drift between snapshot and head presents as flaky feature tests, so nobody files it against test data.
 
-That 2000 is a guess. On a fast machine it wastes two seconds. On a loaded CI runner it is sometimes not enough, and the test fails even though the app is fine.
+The real wall is referential integrity once you subset. You cannot clone full prod per branch, so you carve out 2 percent. Naive sampling shreds foreign keys: orders pointing at users you excluded, events referencing deleted sessions. Tonic, Snaplet, and hand-rolled topological extractors exist because correct subsetting is graph traversal, not a WHERE clause. We push it further, letting an LLM fill the leaf records (addresses, free-text notes) while the extractor guarantees the FK skeleton, so data reads like prod without a PII row.
 
-Wait for the thing you actually care about instead:
+Two things paid off. Pin the seed set to the migration hash, and fail the env build when they diverge. And track p95 provision time as an SLO, because once it crosses a minute, people stop spinning up envs and test on shared staging instead. That regression hides until staging is on fire.
 
-  await page.click("#submit")
-  await expect(page.locator("#result")).toBeVisible()
+What broke first for you, the bytes or the foreign keys?
 
-Now the test waits up to the timeout but returns the moment the element shows up. Faster on average, and it stops failing under load.
-
-The rule I push on every team is simple. Treat waitForTimeout (and Cypress cy.wait with a number) as a code smell that has to be justified in review. If you genuinely need to wait, wait on a network response, a DOM state, or a polled assertion, never a raw duration.
-
-A few things we agreed on:
-- No bare numeric waits in merged tests.
-- One retry on the whole job, not per-test. Per-test retries hide real bugs.
-- A test that needs three reruns to pass gets quarantined, not ignored.
-
-We did this one folder at a time, and our CI failures from timing dropped to almost nothing. The tests also got a little faster, which was a nice surprise.
-
-If your team re-runs CI as a habit, grep for the sleeps first. That is usually where the noise lives.
-
-#QAAutomation #TestAutomation #Playwright #FlakyTests #SDET
+#TestDataManagement #EphemeralEnvironments #SDET #TestInfrastructure #QAEngineering
 
 ---
 
-## Day 12 — 2026-06-27 — Web scraping & data extraction
+## Day 11 - 2026-06-27 - Quality metrics and SLOs for engineering leaders
 
-**Your Scraper Is Racing the Page**
+**Retiring the flake-rate SLO**
 
-The pitfall that burned me most in web scraping was trusting that an element being present in the DOM meant it was ready to read.
+We killed our flake-rate SLO and replaced it with a "time-to-green" budget. Flake-rate was rewarding the wrong work, and I want to show the trade-off before someone copies the old design.
 
-I had a Playwright job pulling product prices off a few hundred pages a night. It passed in dev, passed in CI, then started writing rows where the price was null or, worse, the old cached value from a skeleton state. No exception. No failed status. Just quietly wrong data into a report that someone downstream actually used.
+The setup: a 4,000-test suite on the merge queue, flake-rate target under 1 percent, measured as reruns that flipped on the same SHA. We held it for two quarters. Lead time still degraded, and the reason is structural. Flake-rate is a ratio, so the cheapest way to defend it is to add retries and quarantine harder. Both make the number better and the product worse. A quarantined test is a coverage hole nobody is paged for, and auto-retry hides ordering bugs that are real defects wearing a costume.
 
-The cause was a race. The page rendered a placeholder, my selector matched it, I grabbed text, and the real value arrived 200ms later via an XHR call. wait_for_selector returned the instant the node existed, which is not the same as the node holding the value I wanted.
+So we changed the target the team optimizes against. The new primary SLO is p95 time-to-green per PR, with two guardrails: quarantined-test count (a budget, not zero) and escaped-defect rate from quarantined areas. The trade-off is honest. Time-to-green folds test reliability, infra capacity, and shard balance into one noisier number. We took worse attribution for better incentive alignment, and kept per-test flake telemetry as a diagnostic. Goodhart's law fires the moment a diagnostic becomes a goal.
 
-Two fixes mattered. First, stop waiting on presence and start waiting on the thing you actually care about. With Playwright I waited on the network response instead of the element:
+Two things made this safe. Failure attribution lands before the SLO, so "infra" versus "product" versus "test" is a classifier label on every red run, backfilled from stack-trace clustering plus container exit signals. And quarantine has a TTL with an owner and an expiry PR, so the budget cannot quietly grow.
 
-  page.wait_for_response(lambda r: "api/price" in r.url and r.status == 200)
+The point for anyone setting suite SLOs: pick the metric expensive to game in the wrong direction, even when it is harder to read. A clean ratio you defend by hiding tests is worse than a noisy latency number that forces a real fix.
 
-Or I asserted on content rather than existence:
+What is the most-gamed metric you have had to retire?
 
-  expect(locator).not_to_have_text("--")
-
-Second, treat scraping output like test output. I added a Great Expectations check on the extracted table: price is non-null, numeric, and inside a sane range. If 5 percent of rows fail, the run fails loudly instead of shipping garbage.
-
-The mindset is the real lesson. A scraper is a test that asserts on someone else's UI. If you would not let a flaky locator pass in your e2e suite, do not let it pass in your data pipeline either. The stakes are higher, because nobody reads scraper output as carefully as a red build.
-
-When in doubt, scrape the same page twice and diff. If the runs disagree, your selector is racing.
-
-#WebScraping #DataEngineering #Playwright #TestAutomation #DataQuality
+#SDET #QualityEngineering #TestInfrastructure #SRE #EngineeringLeadership
 
 ---
 
-## Day 13 — 2026-06-28 — Using AI for QA Ops
+## Day 12 - 2026-06-28 - Advanced techniques: property-based, mutation, fuzzing, deterministic simulation
 
-**Selenium vs Playwright for AI QA Ops**
+**Reproducibility beats discovery**
 
-Last quarter I migrated part of our suite from Selenium to Playwright while wiring AI-assisted test maintenance into both. Here is what actually mattered.
+The hardest bug property-based testing ever found on my team lived in our own shrinker, not the code under test. It cost three weeks of false confidence before anyone noticed minimization was discarding the failing case and reporting the passing remainder.
 
-The AI angle first, because that is the hype. Both tools now claim "self-healing" locators and LLM-generated tests. The thing nobody tells you: AI is only as good as the snapshot it gets to read. Playwright hands an AI agent a clean accessibility tree, so when I ask a model to fix a broken selector it sees roles and labels and proposes getByRole("button", { name: "Submit" }). With Selenium I had to build that context myself, scraping the DOM first.
+That is the part nobody budgets for. The value of generative testing is not the counterexamples it surfaces. It is whether the reproducer fits in a human's head. A Hypothesis run that shrinks to a 4000-character JSON blob is barely better than a flaky end-to-end test. Nobody bisects it, so the property gets marked xfail and dies. The generator worked. Reproducibility did not, and that is what survives on-call at 2am.
 
-Where Selenium still wins: real browser coverage and legacy stacks. Need actual Safari on a device farm, or stuck with ten years of Java page objects? Ripping that out for an AI demo is a bad trade.
+Deterministic simulation testing is the honest answer. Run the whole system on one thread with a seeded PRNG, a controlled clock, and a simulated network the scheduler drives (the FoundationDB and TigerBeetle model). Every failure then ships with a seed that replays the exact interleaving down to message order. The hard part is routing every nondeterministic call site through that scheduler, allocator and time included. Miss one and your "deterministic" suite lies to you.
 
-Where Playwright helps for AI ops:
-- auto-waiting kills most flake, so the AI debugs logic, not timing
-- trace viewer gives a model a structured failure to read, not a raw stack trace
-- one API across Chromium, Firefox, WebKit
+Mutation testing has the same failure mode dressed as a metric. Teams run Stryker or mutmut, see 70 percent killed, and grind toward 90. Wrong objective. In mature code most survivors are equivalent or guard invariants nothing exercises. Score the aggregate and people write assertions that kill mutants without pinning behavior. Run mutants diff-scoped in CI against changed lines, and read which ones live in payment or auth paths.
 
-A concrete before/after from our flaky login test.
+Generation is cheap now. An LLM can cluster a thousand failures by root cause before anyone triages. The scarce resource is the engineer deciding a minimal, replayable failure matters. Spend there first.
 
-  Before (Selenium, explicit wait, still flaked):
-    WebDriverWait(driver, 10).until(
-        EC.element_to_be_clickable((By.ID, "submit")))
-
-  After (Playwright, auto-wait):
-    page.get_by_role("button", name="Log in").click()
-
-I run both behind one pytest harness reporting into GitHub Actions, so the maintenance script does not care which engine ran. My honest take: use AI to triage failures and draft locators, not to author whole suites. The model is a fast junior that needs structured output to stop guessing.
-
-Has anyone gotten AI selector healing stable on Selenium without heavy plumbing?
-
-#QAAutomation #Playwright #Selenium #SDET #TestAutomation
+#testing #sdet #propertybasedtesting #mutationtesting #qualityengineering
 
 ---
 
-## Day 14 — 2026-06-29 — AI-driven development
+## Day 13 - 2026-06-29 - QA Ops: quality engineering as an internal platform
 
-**When AI Writes Tests That Cannot Fail**
+**Quality engineering as an internal platform**
 
-Last quarter I let an AI agent generate an entire integration test suite for a payments service. About 240 tests, all green, written in roughly two days of prompting. I was happy. Then we shipped a bug to staging that the suite should have caught, and I went looking for why.
+We deleted the internal QA team queue and replaced it with a platform teams self-serve against. The forcing function was one metric on a dashboard: time-to-trustworthy-signal, the minutes from opening a PR to a merge decision a human actually believes. It sat at 40-plus minutes, most of it waiting on a suite nobody trusted.
 
-The tests were green because most of them asserted almost nothing.
+Three services carry it.
 
-A typical generated case called the endpoint, checked that the response status was 200, and moved on. No assertion on the response body, no check that the refund amount matched, no verification that the ledger row was written. The model learned the shape of a pytest test without the intent of one. It optimized for "passes" because that is what looked correct in my prompt.
+A test-selection service sits in front of CI. On each PR it computes the affected set from a coverage-to-file map (pytest-cov line data joined to the git diff) and returns a minimal suite plus a confidence score. Below threshold we run everything, because a wrong skip costs more than a slow pipeline. This is test impact analysis as an API with one owner, not a per-repo script everyone forks and lets rot.
 
-What I do now on AI-assisted test work.
+A quarantine service owns flake. The runner posts a failure, a job reruns it three times in isolation, and the verdict is mechanical: consistent fail is real, mixed is flaky and gets auto-quarantined against the owning team from CODEOWNERS. We cluster failures by normalized stack and error signature so one root cause does not open thirty tickets. Each suite carries a flake-rate budget. Cross it and the suite stops blocking merges until someone pays it down. That rule is why people trust the green check.
 
-- I mutate the code on purpose. I break the refund math, flip a boolean, or drop a field, then run the suite. If nothing goes red, the tests are decoration. This is manual mutation testing, and mutmut or cosmic-ray can automate part of it.
-- I review assertions first and setup second. Generated setup is usually fine. The assertions are where the model gets lazy.
-- I ask for one test, read it carefully, then ask for more in that style. Reviewing 240 tests at once means reviewing none of them.
+The third piece is a signal store. Every run emits a structured record (test id, duration, outcome, retry count, runner, commit sha). That table is the product. p95 duration, flake rate, and which tests gate the most PRs come from one query, and can-i-deploy reads it directly.
 
-I still use the agent every week. It is fast at boilerplate, fixtures, parametrize tables, and turning a curl command into a requests call. But a passing test is a claim, and AI is very good at producing claims that have nothing behind them.
+The hard part was organizational. You treat internal teams as customers with an SLA on the platform itself, and refuse every request to bolt a manual gate back on. Signal is under 9 minutes now.
 
-The lesson I keep relearning is that generated coverage is not tested behavior. A suite that cannot fail is worse than no suite, because it tells you that you are safe when you are not.
+What would you make an API before a script?
 
-#TestAutomation #AIAssistedDevelopment #SDET #QualityEngineering #MutationTesting
+#QAOps #TestInfrastructure #PlatformEngineering #ContinuousDelivery #SDET
 
 ---
 
-## Day 15 — 2026-06-30 — CI/CD & test infrastructure
+## Day 14 - 2026-06-30 - AI for QA: LLM-assisted test generation, triage and self-healing
 
-**Stop Quarantining Flaky Tests**
+**Self-healing locators hide defects**
 
-Stop quarantining flaky tests. Delete them or fix them this week.
+Self-healing locators get sold as reliability. In most suites they are defect-hiding, and I would kill them before I killed retries.
 
-The quarantine folder is where coverage goes to die. I have seen it on three teams. A test goes flaky, someone tags it @skip or moves it into a "known-flaky" suite with a ticket, and CI goes green again. Everyone moves on. Six months later that folder holds 80 tests and nobody trusts one of them. The original failure is still there. You just stopped looking at it.
+A locator break is a signal. When data-testid="checkout" disappears and your framework heals by matching on nearby text or a sibling DOM path, you have suppressed the one event that told you the contract between app and test changed. Sometimes that change is cosmetic. Sometimes a dev renamed the action, moved it behind a flag, or shipped a regression that removed it for half of users. The healer cannot separate those, so it papers over all of them at one confidence.
 
-The honest version is harder but cheaper over time. When a test flakes, do one of two things, today.
+The failure is delayed and more expensive. The test passes for weeks while the locator drifts from intent. Then a heal picks the wrong element, you get a green run that exercised the wrong flow, and you debug a false negative in production instead of a clean red in CI.
 
-Fix the root cause. Most flake is a race, a hardcoded sleep, or an order dependency. In Playwright, swap the sleep for a web-first assertion like expect(locator).toBeVisible(). In pytest, kill shared state with proper fixtures and stop relying on test order.
+If you run self-healing, constrain it like any automated mutation to test code:
+  - shadow mode only. Log the proposed locator, keep the run red.
+  - require a confidence score and a reviewed diff before a locator lands.
+  - attribute every heal to a commit. No matching change, no heal.
+  - treat heal-rate as an SLO with a budget. A suite healing 15 percent of locators per release does not have a flaky framework, it has unstable test IDs, and that is a product conversation about contract stability.
 
-Delete it. If a test is not worth fixing, it is not worth keeping. A skipped test is worse than no test, because it shows up in the count and lies about coverage.
+Same logic governs LLM triage. An LLM that auto-closes failures as "known flake" is a healer for your bug tracker. Fine for clustering and first-pass routing. Wrong as the final call, because a wrong auto-close is an escaped regression nobody re-opens.
 
-What I do instead of a quarantine bucket: run the suite with a small retry budget so one transient failure does not block a deploy, but log every retry. Then I read the retry log weekly. A test that needed a retry twice in a week is a bug report, not a footnote.
+Let the model propose a label and a blast radius. Gate the close on a human. Generation and triage stay on the proposing side, the verdict stays yours.
 
-One number to watch. If more than about 1 to 2 percent of your runs need a retry, the tests are not your problem. It is the environment, the test data, or timing assumptions baked into the app. Flaky tests are usually telling you the truth about production. Listen before you mute them.
-
-The quarantine folder feels like progress because the build is green. Green is not the goal. Trust is.
-
-#TestAutomation #CICD #QAEngineering #FlakyTests #SDET
-
----
-
-## Day 16 — 2026-07-01 — API & contract testing
-
-**The contract testing metric most teams ignore**
-
-Most teams I have worked with track how many contract tests they have. Almost none track the only number that matters: how many production incidents those tests would have caught before deploy.
-
-We started measuring that last year. The setup was Pact for consumer-driven contracts between our services, plus Postman/Newman in CI for the public API. Counting tests told us nothing useful, so we changed what we logged.
-
-Here is what we measure now.
-
-- Escaped contract breaks. Every time a service ships a breaking change (renamed field, type swap, removed enum value) that reaches staging or prod, we tag it. The goal is to drive this toward zero. It is the closest thing to a true defect-escape rate for integrations.
-
-- Time-to-detect. With Pact verification running on every provider build, a breaking change fails the provider's pipeline in minutes instead of surfacing as a 500 in a downstream team's service two days later. We went from "found by a partner team" to "found by the provider's own CI."
-
-- Mean time to diagnose. A good contract failure names the consumer, the interaction, and the exact field. Compare that to reading a stack trace from an integration test that only says the response did not match.
-
-The payoff is not the test count. It is the cross-team debugging hours you stop spending.
-
-One honest trade-off. Contract tests verify shape and agreed behavior, not real load or data correctness. They will happily pass while the provider returns the wrong value in the right schema. So I pair them with a small set of end-to-end checks and k6 for load, and I keep the contract suite narrow on purpose.
-
-If you can only add one metric this quarter, log escaped contract breaks. It changes the question from "are we writing enough tests" to "are the right changes failing fast."
-
-#ContractTesting #APITesting #QAEngineering #TestAutomation #Pact
+#SDET #TestAutomation #QualityEngineering #AIinTesting #TestInfrastructure
 
 ---
 
-## Day 17 — 2026-07-02 — Test Automation
+## Day 15 - 2026-07-01 - Testing LLM/AI systems: evals, non-determinism, prompt regression
 
-**Self-Healing Tests Are Here, Judgment Is Not**
+**SLOs for LLM Evals**
 
-In 2026 I stopped writing most of my UI selectors by hand, and my flaky test rate dropped more than any framework upgrade ever gave me.
+Most LLM eval dashboards report one number, pass rate, and that number lies. It hides which capability regressed, folds sampling noise into real drift, and gives release managers nothing to gate on. Here is the SLO framework I run instead.
 
-The trend everyone talks about is AI generating whole test suites. The part that actually changed my day to day is smaller and less exciting: self-healing locators and AI-assisted triage sitting on top of tools I already use.
+Split the suite into capability slices, never one bucket: extraction accuracy, instruction-following, refusal correctness, citation faithfulness for RAG, format validity. Each slice carries its own budget. A 2 percent drop in JSON validity blocks the release. A 2 percent drop in tone is noise. One aggregate score cannot tell those apart.
 
-Here is what I mean in practice. With Playwright I lean on role and label based locators, and when the DOM shifts the runner can suggest a repaired selector instead of just going red.
+Set each threshold as a floor plus a drift gate, not a single target:
+  faithfulness (Ragas) >= 0.85 absolute, regression vs last release <= 1.5 points
+  format validity >= 99.5 (a contract, so sub-99 is a P1)
+  refusal precision >= 0.95 on the safety slice
+  p95 judge-scored quality no worse than prod baseline minus 2 points
 
-Before:
-  page.locator("#submit-btn-3a9f")
-After:
-  page.get_by_role("button", name="Place order")
+Now the part most teams skip. At temperature > 0 your eval is a sampler, so a single run cannot fail a build. Run each case n=5, take the mean, gate on a bootstrap confidence interval. If the new CI overlaps the baseline CI, that is variance, not a regression. Pin a seed where the provider allows, log the model snapshot id, and fail the build when it changes silently. Most sudden eval drops are an unpinned model version, not your prompt.
 
-The first one breaks on every redeploy. The second survives most refactors, and when it does break, the AI suggestion is usually close enough to review in seconds.
+Tier the cost too. Deterministic checks (schema, regex, exact-match) run on every commit, the frontier judge runs on merge and nightly on the golden set. Hold judge-vs-human agreement (Cohen's kappa) above 0.7 and re-validate the judge whenever you edit its prompt, because your judge is a model under test too. A flake budget on the rig matters as much as the score: a gate nobody trusts gets bypassed.
 
-I am careful about where I let this run. A suggested locator fix is a pull request I read, not a silent auto-merge. The moment a tool rewrites assertions on its own, you lose the one thing tests are for, catching the change you did not intend.
+What are you gating on today, per-capability or one number?
 
-What I have found useful so far:
-- Let AI propose locator repairs, but gate them behind code review.
-- Use it to cluster failures in CI (GitHub Actions logs are noisy), so I triage one root cause instead of forty red checks.
-- Keep generated tests in a quarantine suite until a human has read them.
-
-The skill that matters in 2026 is not prompting. It is knowing which failures are real, which fixes are safe to accept, and where a confident suggestion is quietly wrong. The tooling got faster. The judgment is still ours.
-
-#TestAutomation #SDET #Playwright #QAEngineering #AITesting
+#LLMOps #AIEvals #MLTesting #PromptRegression #SDET
 
 ---
 
-## Day 18 — 2026-07-03 — SDET engineering
+## Day 16 - 2026-07-02 - AI-driven development: testing AI-written code and agentic workflows
 
-**The 7-Step Checklist I Run Before Merging Any Test**
+**Your suite is notarizing the bug**
 
-Most flaky test suites I inherit are not flaky because of bad luck. They are flaky because nobody ran a checklist before merging the test. Here is the one I run on every new UI or API test before it goes into main. It takes ten minutes and saves hours later.
+Most teams reviewing AI-written code still review the diff. Wrong artifact. When an agent writes the implementation it also writes the tests, and a model that misread the spec emits a green test that pins the misread in place. Your suite stops being a safety net and becomes a notarized copy of the bug.
 
-1. Kill the hard waits. Search the diff for sleep(), time.sleep, and waitForTimeout. Replace each with a condition. In Playwright, expect(locator).toBeVisible() already retries. In Selenium, use WebDriverWait with an expected condition. A fixed sleep is a bet on the slowest machine you have never seen.
+The fix is structural: whatever writes the implementation must never write the oracle.
 
-2. Pin the selector to something stable. Prefer data-testid over a CSS nth-child, and either over an XPath that walks the DOM. If the test breaks when a designer moves a div, the selector was wrong.
+The pipeline I run for agent-generated changes:
 
-3. Run it three times in a row locally. Same machine, back to back. If it fails once out of three, it is already flaky. Fix it now, not after it poisons the dashboard.
+1. Agent A gets the ticket and writes ONLY the properties, never the code. For a pricing function: discount monotonic in quantity, total never negative, rounding idempotent. Encoded as Hypothesis strategies, not example tests.
 
-4. Run it isolated, then in the full suite. Order-dependent tests pass alone and fail together. Shared state, leftover DB rows, a session that bled over. Find it before CI does.
+2. Agent B, with no access to A's chain of thought, writes the implementation against the signature alone.
 
-5. Check the teardown. Every record the test creates, it should remove. I have seen suites slow to a crawl because nobody cleaned up.
+3. Run B against A's properties, then run mutmut over B with A's properties as the suite. If the mutation score is under threshold, the properties are too weak, so A goes back, not B.
 
-6. Make the failure message say what broke. assert resp.status == 200 tells you nothing. assert resp.status == 200, resp.text gives you the body when it is a 500.
+Step three is the one people drop. An agent will cheerfully produce tests that pass and kill zero mutants. Mutation score is the only number I trust to say whether AI-written tests constrain anything.
 
-7. Tag it. smoke, regression, slow. Future you will want to run a subset in a hurry.
+Two guardrails that earned their place:
 
-I do not always get all seven right. But the suites where I skipped this are the ones I am still apologizing for. Boring checklists keep CI green at 2am.
+- Pin a golden set of human-written tests the agent cannot touch. Any PR that edits them fails CI hard. This catches the model "fixing" a red test by deleting the assertion, which happens more than you would like.
 
-What is on your pre-merge list for a new test?
+- Diff the agent's assumptions against the spec with an LLM-as-judge in a separate context. The same model in the same context rubber-stamps its own work.
 
-#SDET #TestAutomation #QAEngineering #Playwright #FlakyTests
+I no longer ask whether the agent wrote correct code. I ask whether anything could have caught it being wrong. Usually the answer is no, and that gap is the deliverable.
 
----
+Where is your suite notarizing the model's bugs?
 
-## Day 19 — 2026-07-04 — QA automation strategy
-
-**The flaky test was right, my assertion was wrong**
-
-Last month a single Playwright test failed about one run in twenty. Always the same assertion, never on my machine, only in CI. The kind of failure that tempts you to add a retry and move on.
-
-I did not add the retry. I added logging instead.
-
-The test filled a form, clicked Save, then asserted a success toast was visible. On the failing runs the click landed, the network request fired, but the assertion timed out. My first guess was the usual one: the element was not ready. Wrong. The toast had already appeared and disappeared before Playwright looked for it.
-
-The real cause was a race between two things I did not control together. The app showed the toast for 3 seconds. In CI, under load, the runner sometimes paused long enough between the click and the assertion that the toast was gone by the time we checked.
-
-The fix was not a longer timeout. A longer timeout would have made it worse, because the toast was already gone. I changed what we waited on:
-
-  // brittle
-  await page.click('text=Save')
-  await expect(page.locator('.toast')).toBeVisible()
-
-  // deterministic
-  const resp = page.waitForResponse('**/api/save')
-  await page.click('text=Save')
-  await (await resp).finished()
-  await expect(page.locator('[data-saved="true"]')).toBeVisible()
-
-I tied the assertion to a state that persists (a data attribute the app sets after save) instead of a transient animation.
-
-What I take from this now: flaky usually means I am asserting on something with a lifetime shorter than my own scheduling jitter. The retry hides that. The state model fixes it.
-
-I run suspected flaky tests 50 times in a loop before I trust a fix. One green run proves nothing.
-
-#QAautomation #TestAutomation #Playwright #FlakyTests #SDET
+#SDET #TestAutomation #AIQuality #SoftwareTesting #QualityEngineering
 
 ---
 
-## Day 20 — 2026-07-05 — Web scraping & data extraction
+## Day 17 - 2026-07-03 - Flaky-test management at scale: detection, quarantine, attribution
 
-**Scaling a Scraping Suite Without Killing Speed**
+**When quarantine buries a real bug**
 
-Our scraping suite went from 40 spiders to over 300, and the thing that nearly killed us was not a website change. It was the suite itself. A full run took close to two hours, most of it spent waiting on network I/O while a single process sat idle.
+A test blocked our deploy for three days, and it was not flaky. It was telling the truth. Our quarantine system buried it.
 
-The first instinct was to throw more retries and longer sleeps at flaky sites. That made everything slower and hid real failures. So we reworked it.
+The post-mortem: a checkout test started failing around a 0.8 percent rate. Our auto-quarantine rule moved anything above 0.5 percent over 50 runs out of the blocking set into a known-flaky lane that only warns. Except this test was catching a real race on a payment idempotency key under concurrent retries. We had automated the act of ignoring our most valuable signal.
 
-What actually changed the numbers:
+The root mistake was attribution by rate alone. A 0.8 percent infra timeout and a 0.8 percent genuine race are identical on a dashboard. Rate tells you a test is unstable. It says nothing about why.
 
-- Concurrency where it belongs. We moved the bulk of fetches to async httpx with a bounded semaphore (start around 20, tune per host). Scrapy already does this well, so there we just raised CONCURRENT_REQUESTS_PER_DOMAIN instead of fighting the framework.
+What we changed:
 
-- Separate the parse from the fetch. Parsing HTML with selectolax or parsel is CPU work and does not belong in the same coroutine as the download. We cache raw responses to disk, so when a selector breaks we re-parse from cache instead of re-hitting the site. That cut our debug loop from minutes to seconds.
+Quarantine now requires a cause class, not a threshold. We fingerprint every non-deterministic failure (top stack frame plus normalized error plus the introducing diff) and cluster the signatures. A test auto-quarantines only if its cluster maps to a known environmental class (network, fixture teardown, clock skew). Anything in an unknown cluster stays blocking and pages the owning team. The clustering step also runs an LLM-as-judge pass that reads the failure log and the assertion to vote on infra-versus-product, and we gate on agreement between that vote and the signature cluster. Disagreement means a human looks.
 
-- Test selectors against fixtures, not the live web. We snapshot a few real pages per source and run pytest over them. A live smoke test runs nightly in GitHub Actions, but the fast suite never touches the network. Live tests that gate every commit are how you get a red pipeline because a marketing banner moved.
+Quarantine is a loan, not a write-off. Each muted test gets a 10-day expiry and a tracking issue. If nobody fixes or reclassifies it, the build fails on it again, on purpose. No silent permanent skips. We found 40-plus tests muted for over a year.
 
-- Rate limit per host and honor robots. That kept us off block lists.
+We also rerun quarantined tests against the exact merge that quarantined them, not on a timer, and bisect the introducing commit. That catches the real regression someone shipped behind a flake label.
 
-The trade-off is real. More concurrency means more partial failures to reason about, and cached fixtures drift from production. We accept that. A two-hour suite nobody runs is worse than a ten-minute suite with a nightly live check behind it.
+The uncomfortable part: a quarantine system tuned purely for green builds will eventually mute your best test. Suppression is a production change. It needs evidence and an expiry, same as any other.
 
-What I optimize now is the feedback loop, not raw crawl speed.
+How does your platform separate a real intermittent bug from infra noise before it decides to mute anything?
 
-#WebScraping #TestAutomation #Python #Scrapy #DataEngineering
-
----
-
-## Day 21 — 2026-07-06 — Using AI for QA Ops
-
-**I Let an LLM Triage Our Flaky Tests**
-
-I let an LLM triage our flaky test failures last quarter, and the first version made things worse. It would "explain" a failure with confident nonsense and we chased ghosts. The fix was to stop asking it to reason in the abstract and start feeding it structured evidence.
-
-When a Playwright test fails in GitHub Actions, we already capture the trace, the failing assertion, and the last few network requests. Instead of pasting a stack trace into a prompt, we hand the model a compact JSON record and ask one narrow question: is this a product bug, a test bug, or infra.
-
-    payload = {
-        "test": test_id,
-        "error": err.splitlines()[0],
-        "selector": failed_selector,
-        "status_codes": recent_status_codes,
-        "retries_passed": retried_ok,
-    }
-
-The prompt is boring on purpose. Classify as product_bug, test_bug, or infra. Return JSON with category, confidence, and why. If status_codes contain 5xx, prefer infra. If retries_passed is true, prefer test_bug.
-
-Two things made this useful. We gate on confidence: anything under 0.7 goes to a human, no auto-labeling. And we never let the model close or mute a test. It writes a suggested label on the GitHub issue. A person still pulls the trigger.
-
-On a typical week it sorts 60 to 70 percent of failures correctly, enough to halve the morning queue. The wins are the obvious 5xx and timeout failures that humans should never have looked at, not the clever cases.
-
-The trap is treating the model as an oracle. It is a fast first-pass sorter that works only when you give it the same evidence you would give a junior engineer. Garbage context in, confident garbage out. I would not let it touch test selection yet.
-
-#QAAutomation #SDET #TestEngineering #AIOps #Playwright
+#testautomation #sdet #flakytests #qaops #softwarequality
 
 ---
 
-## Day 22 — 2026-07-07 — AI-driven development
+## Day 18 - 2026-07-04 - Test impact analysis and CI test selection
 
-**AI Writes Tests That Pass And Prove Nothing**
+**Test Impact Analysis Is a Priced Bet**
 
-Last month an AI coding assistant wrote 40 tests for a new checkout flow in about ten minutes. All green. I almost shipped it. Then I read them.
+Test impact analysis silently skips the one test that would have caught the regression, and no postmortem attributes the miss correctly. That failure mode is what teams find in production, and it is why I treat selection as a risk-priced optimization, not a CI speedup.
 
-Every assertion was checking that the mock returned what the mock was told to return. The tests confirmed nothing about the real code. This is the trap I keep hitting with AI-generated tests. They pass, the coverage number climbs, and the suite proves almost nothing.
+The mechanics are settled. Build a target graph from coverage or static dependencies, map a diff to affected tests, run the subset, defer the rest. Bazel target graphs, Nx affected-project resolution, coverage-fed selection in pytest or JUnit all do this. On a large suite you cut p95 PR time hard. Nobody argues the win.
 
-The model is good at producing tests that look right. It mocks the payment client, stubs the database, then asserts the stub was called. Green checkmark, zero signal. When I deleted the real function body and replaced it with return None, 38 of those 40 tests still passed.
+The hard part is that the graph is a stale approximation. Coverage records which test touched which line on the last full run. It cannot see a flag resolved from LaunchDarkly at runtime, a fixture mutated three tests upstream, an ORM loading SQL from a file the graph never parsed, or behavior gated on data shape, not code path. Reflection and serialized state live outside any static map.
 
-That last part is the check I now run on any generated test. Break the code on purpose, then run the suite. If tests still pass, they were testing the mocks. If an assertion only repeats the arrange step, delete it. If a test has no clear failure mode, it has no reason to exist.
+So instrument the loss instead of denying it:
 
-I still let the assistant draft tests. It is fast at the boring scaffolding, the fixtures, the parametrize tables. But I write the assertions myself, or rewrite them to check observable behavior: the HTTP status, the row in the database, the email that got queued. With pytest I lean on real objects and a test database far more than mocks now.
+  selected subset on every PR
+  full suite on merge to main, nightly, pre-release
+  escaped-defect rate: failures the full run caught that selection skipped
+  treat that rate as a budget with an SLO, not a dashboard number
 
-A coverage number an AI hands you is a starting question, not an answer. Run mutmut or cosmic-ray once in a while and watch how much covered code survives mutation. The gap is usually wider than the dashboard suggests.
+When the rate breaches budget, widen the blast radius or recompute the graph. Two interactions bite hardest. A flaky test that never gets selected never gets quarantined, so its attribution data rots. And PR coverage gates computed on a subset are arithmetically wrong, so gate against full-suite coverage or drop the gate.
 
-Generated tests are a draft. Treat them like one.
+Want sharper selection? Train it on change history, not the call graph alone. File co-change frequency and historical test-to-failure correlation catch dependencies coverage cannot. Price the bet and it pays. Trust it as truth and it skips exactly the test you needed.
 
-#TestAutomation #AIDrivenDevelopment #SDET #Pytest #SoftwareTesting
-
----
-
-## Day 23 — 2026-07-08 — CI/CD & test infrastructure
-
-**Hosted vs Self-Hosted CI Runners for Test Suites**
-
-I have run end-to-end suites on both GitHub Actions hosted runners and a self-hosted runner fleet. After two years of paying for both, here is where I land.
-
-Hosted runners win on day one. Zero maintenance, every job starts on a clean VM, and you stop worrying about state leaking between runs. For a Playwright suite that spins up a browser, hits a staging API, and tears down, that clean slate is worth a lot. Flaky tests are hard enough without a poisoned cache from last Tuesday.
-
-The pain shows up at scale. Our browser tests pull a few hundred MB of node_modules plus the Playwright browser binaries on every job. On a cold hosted runner that is two to three minutes of setup before a test runs. Multiply by 40 shards and the bill (and the wall-clock time) gets ugly fast.
-
-Self-hosted fixes the cold start. We bake the dependencies and browsers into the runner image, so a job starts testing in seconds. We also get bigger machines for k6 load runs that would choke a standard hosted runner. The trade-off is real. Now you own patching, autoscaling, and the security story for anything that touches your network.
-
-Where I have settled: hosted runners for PR checks, where isolation matters more than speed and the volume is spiky. Self-hosted for nightly full-suite and load tests, where warm caches and big machines pay off.
-
-One thing that bit us: self-hosted runners reuse the filesystem by default. A leftover .env or a running Docker container from a previous job will make tests pass that should fail. We now wipe the workspace and prune containers in a pre-job step.
-
-If you are starting out, use hosted runners and measure. Move the slow jobs off once the numbers justify the cost.
-
-#CICD #TestAutomation #SDET #GitHubActions #Playwright
+#TestImpactAnalysis #ContinuousIntegration #SDET #TestAutomation #QAOps
 
 ---
 
-## Day 24 — 2026-07-09 — API & contract testing
+## Day 19 - 2026-07-05 - Consumer-driven contract testing and API governance at scale
 
-**The Contract Test That Saved a Release**
+**Contract Testing at Scale**
 
-A backend team renamed a JSON field from "userId" to "user_id" and shipped it. Our mobile app stopped showing order history for two days before anyone noticed. The API tests were all green. That was the moment I stopped trusting status codes alone.
+Pact and Spectral solve two different failure modes, and most platform teams buy the expensive one first.
 
-Here is what bit us. We had a suite in Postman and Newman hitting the provider, asserting 200s and a few field values against a recorded example. The provider changed its response shape. Our tests still passed, because they ran against a stub nobody had updated in weeks. The real consumer broke in production.
+Classic consumer-driven Pact at 300 services means running a broker, wiring can-i-deploy into every pipeline, and asking every consumer team to author and maintain interaction tests. That earns its keep at 20 services with real pairwise coupling. At 300 it becomes a tax: provider verifications pass trivially, the broker matrix grows quadratically, and engineers stop trusting red builds, which is when contract testing dies.
 
-We fixed it with consumer-driven contract testing using Pact. The consumer (the mobile client) declares what it needs from a response, and that expectation becomes a contract. The provider verifies against it in its own pipeline. If the provider drops or renames a field the consumer reads, the build goes red instead of the consumer in production.
+The split that matters. Consumer-driven Pact verifies "does this provider still satisfy the exact shapes my consumers replay." Bi-directional contract testing (Pact BDCT) verifies "does the published OpenAPI stay compatible with the consumer's recorded expectations," with no replay on the provider side. BDCT scales because verification becomes a static comparison against a spec you already publish. You trade fidelity (it trusts the spec is honest) for decoupled pipelines, so pin it to a spec generated from running code (FastAPI, springdoc), not hand-edited YAML that drifts.
 
-A consumer expectation looked roughly like this:
+Governance is the other half, and Spectral owns it. A custom ruleset that fails CI on removed enum values, narrowed types, or tightened required fields:
 
-  .willRespondWith({
-    status: 200,
-    body: { user_id: like("u-123"),
-            items: eachLike({ sku: like("ABC") }) }
-  })
+  given: $.paths..responses[*]..enum
+  then:
+    function: enum-no-removal
 
-The part that mattered was not the tool. It was moving the check left. Before, a shape mismatch surfaced in staging during manual testing. After, it surfaced on the provider's pull request in GitHub Actions, with the consumer named in the failure.
+Back it with oasdiff to classify a PR as breaking, non-breaking, or unclassified, and block on breaking plus unclassified, never on warnings.
 
-Two honest trade-offs. Pact adds friction, because someone has to own the broker and versioning, and teams that do not talk to each other will hate it at first. It does not test behavior, only the contract. We kept k6 for load and a few end to end checks for flows that move money.
+The trap: Spectral and Pact disagree on "breaking." Spectral flags a removed enum as a lint warning. A consumer Pact treats it as fatal. Reconcile that in one place, the merge queue, or teams route around whichever gate hurts more and you ship on hope.
 
-Contract tests catch the cheap, stupid breakages early. That is most of them.
+Where did your contract pipeline fall apart at scale?
 
-#ContractTesting #ApiTesting #Pact #QualityEngineering #TestAutomation
+#ContractTesting #APIGovernance #Pact #SDET #TestingAtScale
 
 ---
 
-## Day 25 — 2026-07-10 — Test Automation
+## Day 20 - 2026-07-06 - Resilient web scraping and data-extraction pipelines (anti-bot, LLM fallback)
 
-**Stop Asserting Business Logic In The Browser**
+**Scaling scrapers: the failure is silent drift**
 
-Stop writing every UI test as an end-to-end test. Push the assertion down to the lowest layer that can still catch the bug.
+Scaling a scraper from 50 sources to 5,000 fails on what nobody instruments: silent schema drift, and an LLM fallback whose unit economics quietly invert.
 
-I spent years maintaining Selenium suites where logging in, creating an order, and checking a tax calculation all ran through the browser. The tax math was correct in code. The test failed anyway because a modal animation shifted a button by 4 pixels. We were paying full E2E cost to verify pure business logic.
+At low cardinality, brittle CSS selectors and two residential proxies get you green, because a human is the real monitor. At scale that flips. Sites rarely block you outright. They rename a class, ship an A/B layout to half the traffic, or move price into a nested JSON-LD blob. Your parser returns 200 and returns rows. The rows are wrong, and you learn it three weeks later when a model trains on them.
 
-Here is the shift that helped my team:
+So treat the parser as a producer in a consumer-driven contract. The schema you assert on the extracted frame is the contract, and drift is a broken pact you catch before write. Run Great Expectations on the frame, not on HTTP status: price non-null, currency in a known set, per-source fill-rate inside a learned band. A 40 percent fill-rate drop on one domain is a drift alarm, not a retry.
 
-- A wrong tax total is a unit test against the calculator.
-- A broken /orders contract is an API test with requests or Postman/Newman.
-- A field that does not save is an integration test against a real database.
-- "Can a user actually check out" is the E2E test, and we keep a handful of those in Playwright.
+On the LLM fallback, the trap is treating it as a parser instead of an escalation tier. Deterministic extractor first, emit a confidence score, route only the low-confidence tail to the model with a strict JSON schema and constrained decoding. Validate that output against the same expectations as the fast path. No schema match, no write. Route everything through an LLM and you have shipped an expensive nondeterministic parser you cannot defend.
 
-The browser is the most expensive and least stable place to assert anything. So I only assert there when the thing under test is the browser itself: rendering, routing, and the wiring between real services.
+Anti-bot work (fingerprint rotation, TLS coherence, headless tells) keeps you on the page. It does nothing for correctness. Make writes idempotent on a content hash so a re-scrape after a fix is free, and put backpressure between fetch and parse so a drift spike does not flood the model budget. Teams that scale spend on observability of parsed output. Teams that stall keep buying proxies.
 
-A before/after from one flow:
-
-  before:
-    Selenium test logs in, navigates, submits, reads total from a <span>
-  after:
-    pytest test calls calculate_total() directly with 12 cases
-    one Playwright test confirms the number reaches the screen
-
-The before was 40 seconds and flaked maybe one run in ten. The after is milliseconds for the math, plus one slow check that rarely lies to me.
-
-This is not anti-E2E. E2E catches integration bugs nothing else will. But when a test fails, I want it to point at the broken thing, not at a layer it happened to pass through. A failing unit test names the function. A failing E2E test names your afternoon.
-
-Write the test at the layer that owns the risk.
-
-#TestAutomation #QA #SDET #Playwright #TestStrategy
+#webscraping #dataquality #sdet #llm #dataengineering
 
 ---
 
-## Day 26 — 2026-07-11 — SDET engineering
+## Day 21 - 2026-07-07 - Performance, load and chaos/resilience testing
 
-**The QA Metrics That Actually Prove ROI**
+**Don't run chaos in prod for fidelity you can fake**
 
-Most QA dashboards I inherit measure the wrong thing. They count tests. Test count tells you little about whether the suite pays for itself. Here is what I track instead.
+We deleted our production chaos experiments and moved almost all of them to staging. The resilience crowd will call that a regression. It was correct for us, and the reasoning is a cost function, not a slogan.
 
-Escaped defects per release. Bugs that reached production divided by total bugs found that cycle. This is the only number that answers what leadership cares about: is testing catching things before customers do. When it climbs, the suite has blind spots that new test cases alone will not fix.
+Production fault injection (Gremlin-style, on live traffic) buys you fidelity: real topology, real data volumes, real noisy neighbors. The price is that your blast radius is bounded by your weakest abort path. Ours failed. We ran latency injection on a payment route, the halt condition keyed off a p99 metric scraped every 60 seconds, and we burned real transactions for most of a minute before rollback. The experiment did its job. The safety control was the defect.
 
-Mean time to detect, then mean time to a green pipeline. If a Playwright run takes 40 minutes and flakes twice a week, developers stop trusting it and start merging around it. I would rather have 200 reliable checks than 2000 that people ignore.
+So the question for each scenario: where does the fidelity gap actually change behavior, and where is it cheap to close?
 
-Flake rate per test. I tag every test that fails then passes on rerun with no code change. Anything above a few percent gets quarantined and fixed or deleted. A flaky test is a liability, not an asset.
+Most failure modes (pod eviction, dependency timeouts, connection pool exhaustion, retry storms) are driven by config and code paths, not production-only state. Those reproduce in an ephemeral env seeded from anonymized k6 or Gatling replay that preserves arrival distribution and key cardinality, not just request rate. We get deterministic reruns, git bisect on a regression, and assertions on steady-state hypotheses (error budget, saturation) rather than "did it crash."
 
-Cost per bug caught. Rough, but useful. Take the engineering hours that went into a layer (unit, API with pytest and requests, end to end) and divide by the defects it caught last quarter. End to end almost always looks expensive, which is the point. It pushes work down the pyramid where it is cheaper.
+What does not reproduce: stateful data skew, cache hit ratios under real key distribution, and cross-region failover under genuine load. That is the only set we still run in production, behind a hard concurrency cap and a synchronous circuit breaker that aborts in under two seconds off a local signal, never a scraped one.
 
-The ROI argument that lands with managers is not "we have 95 percent coverage." Coverage is an input. They want outputs: fewer hotfixes, shorter releases, fewer 2am pages.
+The architectural claim: "test in prod for fidelity" decomposes per failure mode. Fidelity you can synthesize does not earn a production blast radius, however real it feels.
 
-One caveat. Every metric becomes a target and then a lie. If I only reward escaped-defect numbers, people stop logging small bugs. So I read these together, monthly, and treat sudden improvement as a reason to look, not celebrate.
+Where does your abort logic live, and what is its p99 time-to-stop?
 
-Measure what production costs you. Let that decide where the tests go.
-
-#SDET #TestAutomation #QAEngineering #SoftwareTesting #EngineeringMetrics
+#ChaosEngineering #ResilienceTesting #SDET #SRE #PerformanceTesting
 
 ---
 
-## Day 27 — 2026-07-12 — QA automation strategy
+## Day 22 - 2026-07-08 - Test data management and ephemeral environments
 
-**The Test Nobody Wrote On Purpose**
+**Ephemeral envs hid our worst bug**
 
-In 2026 the test I trust least is the one nobody wrote on purpose.
+Ephemeral environments did not fix our flaky tests. They hid a migration defect for a year, and we found it in production when a backfill assumption finally met a real table.
 
-The pattern I keep seeing is teams generating end to end tests from an LLM looking at the running app. You point it at a flow, it produces a Playwright spec, and you have forty new tests by lunch. The coverage number goes up. The confidence does not.
+The pitch was clean. Fresh namespace per PR, seed it, run the suite, tear it down. No shared staging contention, no stale rows, no cross-PR interference. Green pipelines, fast feedback.
 
-Here is what I learned the hard way. Generated tests are good at describing what the app currently does and useless at describing what it should do. They lock in the bug. A model watching a checkout page will happily assert that the total is 0.00 if that is what rendered, because it has no idea what the price was supposed to be.
+The flaw was in what we seeded. A clean environment per run is a closed world, and your tests start treating that closed world as the spec. Production is not a closed world. It carries fourteen years of soft-deleted users sharing reused emails, orders parked in states no current code path can produce, columns that went NOT NULL with a default while older rows kept their original nulls. Our seed scripts encoded the schema, not the distribution. Every fixture was a happy path because a human wrote the case they were already imagining.
 
-So my rule for the year is simple. Use generation for the boring scaffolding, write the assertions yourself.
+So the suite passed on data that cannot exist in prod and skipped data that absolutely does. Teardown compounded it. Because state never outlived a run, nothing surfaced that our migration assumed a prior backfill. In a long-lived shared environment that drift shows up in days. In a pristine per-PR namespace it stays invisible until the migration touches real cardinality and lock contention.
 
-In a Playwright suite that looks like this:
+What changed the outcome:
 
-  // generated: fine
-  await page.getByRole('button', { name: 'Place order' }).click()
+  seed from sampled, subsetted prod with PII masked in place (Tonic, Snaplet, or an FK-walking subsetter)
+  preserve referential integrity across the subset so the sample is queryable, not just present
+  Hypothesis with stateful rule-based machines to reach the states nobody writes by hand
+  Great Expectations to assert the seeded distribution matches prod, not just the row count
+  one long-lived environment deliberately never reset, running migrations continuously as a drift detector
 
-  // mine: the part that actually catches regressions
-  await expect(page.getByTestId('order-total')).toHaveText('$42.00')
+Isolation is a real benefit. Treating the clean slate as ground truth is the failure. If your fixtures only hold data your code can currently create, you are testing your assumptions, not your system.
 
-Let the tool draft the locators, the navigation, and the form filling. The expected values and the boundary cases come from a human who knows the requirement. That is the thing a product person would argue about in a meeting.
+Keep the throwaway envs. Stop letting them define valid data.
 
-Two habits have paid off. I review generated tests in the PR like any other code, and I reject anything where the assertion just mirrors current output. I also keep a small set of hand written contract tests with Pact for the service boundaries, because that is where generation helps least and breakage costs most.
-
-AI is good at typing. It is bad at knowing what correct means. That gap is still the job.
-
-#QAAutomation #SoftwareTesting #Playwright #SDET #TestStrategy
+#sdet #testdata #qaengineering #datamasking #softwarequality
 
 ---
 
-## Day 28 — 2026-07-13 — Web scraping & data extraction
+## Day 23 - 2026-07-09 - Quality metrics and SLOs for engineering leaders
 
-**A Scraping Checklist That Survives Past Week Three**
+**A release risk score that replaced our pass-rate dashboard**
 
-Most scraping projects break in week three, not day one. Selectors drift, the site adds a captcha, and nobody notices until the data file is empty. Here is the checklist I run before writing extraction code.
+A 99.4% pass rate is the easiest number in engineering to fake. It survives quarantining your 30 worst tests and rerunning failures until they go green. We deleted that number and shipped a release risk score instead. Here is what sits under it.
 
-1. Check the API first. Open DevTools, the Network tab, filter by Fetch/XHR, and reload. Half the time the page is already calling a clean JSON endpoint. Hitting that with requests beats parsing rendered HTML.
+Every test run appends a row keyed by test id, commit sha, shard, and verdict (pass, fail, retried-pass, quarantined, skipped). One run can emit several verdicts for one test, so the schema keeps each attempt. That table is the source of truth. Nothing reads a metric off a CI green check, because a green check is a UI state, not a measurement.
 
-2. Read robots.txt and the terms. This is a legal and reputational call, not only a technical one. Know what you can pull, and at what rate, before you build.
+Four SLIs sit on top, each with a budget you can spend:
 
-3. Pick the lightest tool that works. If the data is in the HTML, use requests plus a parser. If it appears only after JavaScript runs, reach for Playwright. I move to a browser only with proof the content is client side.
+  flake rate per test, 30-day window (budget 0.5%)
+  p95 shard wall-clock (budget 8 min)
+  quarantine fraction of total tests (budget 2%)
+  first-attempt pass rate, retries excluded
 
-4. Anchor selectors to stable attributes. Long CSS chains like div > div > span break on the next redesign. Prefer data-testid, an id, or an aria-label. Each selector is a maintenance liability.
+First-attempt pass changed behavior. Once retried-pass stopped laundering into pass, the flake debt was undeniable: roughly 6% of the suite only went green on attempt two or three.
 
-5. Throttle and identify yourself. Add a delay between requests, set a real User-Agent, and respect 429 responses with backoff. One thread hammering a site gets you blocked.
+Attribution is where most teams give up. Failures cluster by normalized stack signature, then cross-reference a coverage-derived impact map for the changed files. A test that fails on its branch but stays green on main and on 20 unrelated PRs in the same window is tagged as the PR's regression, not flake. That tag decides one thing: block the merge, or open a quarantine ticket with an owner and a hard expiry that deletes the test if nobody fixes it.
 
-6. Validate before you trust. I run rows through Great Expectations or a few pytest checks: column count, no nulls in key fields, types match. A scraper returning wrong data quietly is worse than one that crashes.
+can-i-deploy reads three inputs: de-quarantined tests inside the diff's blast radius, flake-budget burn for touched suites, p95 trend versus budget. Past threshold it returns false and a named human signs off.
 
-7. Cache raw responses. Save the raw HTML or JSON before parsing. When a selector breaks, you debug the saved page, not the live site.
+An SLO is not a wall of green. It is a debt ceiling with an owner. What does your dashboard quietly count as a pass?
 
-8. Schedule with monitoring. A GitHub Actions cron run is fine. Make it scream when row count drops or a request fails.
-
-Scraping is easy. Keeping it alive is the work.
-
-#WebScraping #DataExtraction #Python #Playwright #TestAutomation
-
----
-
-## Day 29 — 2026-07-14 — Using AI for QA Ops
-
-**A flaky test usually caught a real race**
-
-Last month I spent two days chasing a Playwright test that failed about 1 in 7 runs in CI and never once on my laptop. Classic non-determinism. The error was a timeout on a "Save" button click, which told me almost nothing.
-
-Here is where I used AI well, and where I did not.
-
-What worked: I gave the model the evidence, not the source. The Playwright trace zip, the failing run's console log, and three passing logs for contrast. I asked it to diff the timelines and tell me what was different in the failing case, not to "fix the flaky test." That framing matters. It found that the failing runs all had a network response for /api/profile arriving after the click, while passing runs had it arrive before. I had skimmed past that twice.
-
-The bug was ours. The button was enabled optimistically, then briefly re-disabled while a background fetch resolved. My click landed in that window. The test was honest. The app had a race.
-
-The fix was boring and correct:
-
-    await expect(page.getByRole("button", { name: "Save" })).toBeEnabled();
-    await page.getByRole("button", { name: "Save" }).click();
-
-instead of clicking the moment the button appeared.
-
-What did not work: when I asked the model to "make this test reliable," it suggested a hardcoded wait and a try/except retry. That hides the race and ships a real bug to users.
-
-So my rule now. I use AI to read evidence faster than I can and form a hypothesis. I do not let it write the fix from a prompt that only describes the symptom. A retry that turns red to green is not a fix. It is a slower way to find out in production.
-
-If a test is flaky, assume it caught something real until you have proof otherwise.
-
-#QAAutomation #Playwright #FlakyTests #TestEngineering #AIforQA
+#SDET #QualityEngineering #TestAutomation #SRE #EngineeringLeadership
 
 ---
 
-## Day 30 — 2026-07-15 — AI-driven development
+## Day 24 - 2026-07-10 - Advanced techniques: property-based, mutation, fuzzing, deterministic simulation
 
-**AI Writes Tests Fast. That Is the Trap.**
+**Stop counting generated cases**
 
-When our Playwright suite was 40 tests, AI writing the tests felt like magic. At 1,200 tests it became the reason CI took 35 minutes and nobody trusted a red build.
+Most property-based suites I inherit measure throughput, not coverage of the failure surface. They report how many Hypothesis or jqwik cases ran and call it covered. Generated case count tells you nothing about whether your generators reach the states that break the system.
 
-The problem was not the AI. It was that I generated tests at scale the same way that worked when the suite was tiny. Each prompt produced a self-contained spec: log in, navigate, set up data through the UI, assert one thing, tear down. Forty of those run fine. Twelve hundred means twelve hundred logins and a flake rate that climbs every week.
+The honest signal is what the suite catches when you deliberately break the code. So I point mutmut or Stryker at the module and run mutation testing against the property suite, not only the example-based tests. Of the mutants that survive, how many would a richer generator or a stronger invariant have killed? Survivors in branch conditions and boundary comparisons are almost always generator gaps in disguise, and they map to a missing strategy: a narrowed integer range, an absent None, a composite that never shrinks to the degenerate case. Line coverage hides this, because a property that exercises a line without asserting the invariant it violates is green and worthless.
 
-What fixed it was changing what I asked the model to produce, not how much.
+The part teams skip: the invariants that matter are about sequences of operations, not single inputs. A round-trip property is the cheap layer. The failures that page you come from interleavings. Hypothesis stateful testing and rapidcheck model-based testing generate operation sequences against a reference model, and that is where deterministic simulation pays off. Seed the RNG, make time and IO injectable, capture the failing seed, and a flaky distributed bug becomes a replayable unit test. Few shops build FoundationDB's simulator, but the cheap version (one injectable clock, one seeded scheduler, seeds saved as CI artifacts) ships in a sprint.
 
-A few rules I now enforce:
+Stop reporting generated case counts. Report surviving mutants per property and replayable seeds in your corpus. Those two numbers tell you whether the technique works or just runs.
 
-- Seed state through an API or fixture, not the UI. The model writes the assertions, but data setup goes through a requests or Newman call or a pytest fixture. Browser steps are reserved for what needs a browser.
-- Make it write the smallest test that fails for one reason. A spec with five assertions across three pages is three tests pretending to be one.
-- Force shared setup. I give it the existing fixtures and page objects and reject anything that re-implements login.
-- Tag and shard. New tests land tagged smoke or regression, so GitHub Actions runs smoke on every push and the full set on merge, parallel across workers.
+#SDET #PropertyBasedTesting #MutationTesting #DeterministicSimulation #QualityEngineering
 
-The result was a suite that shards cleanly because the tests are independent and cheap.
+---
 
-Speed at scale is an architecture problem. AI makes it easy to write more tests, which is exactly why it buries you when the shape of those tests is wrong. I spend more time now on the prompt and the fixtures than on the test bodies, and the suite runs in about 6 minutes instead of 35.
+## Day 25 - 2026-07-11 - QA Ops: quality engineering as an internal platform
 
-The model is a fast junior who never gets bored. You still own the design.
+**Run your test suite like a service with error budgets**
 
-#TestAutomation #SDET #Playwright #QualityEngineering #CICD
+Most quality platforms ship a dashboard nobody acts on. The fix is treating the suite like a production service with error budgets, where breaching a budget changes who merges, what runs, or who gets paged. A red number that changes none of those is a metric, not a contract.
+
+Here is the SLO sheet I run for an internal QE platform. Each line has a threshold, a budget, an owner, and a triggered action.
+
+Flake rate. Budget: 1 percent of runs per suite over a trailing 7 days. Attribute it mechanically: a bot reruns the failing test on the same SHA, and a flip with no diff gets tagged to that test, not eyeballed off a dashboard. Past budget, the suite loses merge-blocking power until it is back under. That rule buys more trust than any framework migration.
+
+p95 PR pipeline duration. Threshold 12 minutes, hard cap 20. You pay drift down with test impact analysis (only the tests reachable from the diff) and sharding, before anyone buys more runners.
+
+Time to triage a red build. Target under 10 minutes. Cluster failures by normalized stack signature, route the largest cluster to its owner through CODEOWNERS, and bisect the suspect range. If a human is scanning raw logs to find which of 40 reds matters, you have a triage gap, not a flake problem.
+
+Quarantine inventory. Budget: under 0.5 percent of tests quarantined, none parked past 10 days. Quarantine without an expiry is deletion you are too polite to commit.
+
+Suite effectiveness. Run mutation testing (Stryker, mutmut) on release-gating modules quarterly. A suite at 90 percent line coverage that kills 40 percent of mutants is theater. Set a mutation-score floor where it gates, not everywhere.
+
+Budgets force a decision. That is the point of writing them down.
+
+What does your flake budget actually block once it is spent?
+
+#QualityEngineering #SDET #TestAutomation #DevOps #SRE
+
+---
+
+## Day 26 - 2026-07-12 - AI for QA: LLM-assisted test generation, triage and self-healing
+
+**The model proposes, a deterministic check disposes**
+
+Most "AI for QA" demos stop at generation. The hard part is the loop that keeps generated tests honest, and that is where I watch teams skip the engineering.
+
+Stage 1: generation with a contract, not a vibe. The model gets the OpenAPI spec plus existing fixtures, and the prompt forces output into a schema I can reject:
+
+  System: emit pytest cases against the attached spec.
+  Per case return JSON: {name, endpoint, preconditions,
+  assertions[], oracle_source}. oracle_source must cite a
+  spec line or a fixture id. If you cannot, set
+  needs_human=true and stop.
+
+That constraint kills most hallucinated assertions. A test whose oracle traces to nothing is a guess with a green checkmark.
+
+Stage 2: triage with the model as a clustering tool, never a judge of truth. On a red run it gets the failure, the diff of the last five commits on that path, and 30 days of prior outcomes for that test, then proposes one label from a fixed enum (product bug, test bug, infra, flake) and closes nothing. The label routes, then gets scored against what the human concluded, so I carry a measured triage accuracy, not a feeling. Mine sits in the high 70s: enough to route, not to trust unattended.
+
+Stage 3: self-healing locators behind a gate. When a Playwright selector breaks, the fix lands only after three deterministic checks pass: it resolves to exactly one element, a visual diff of the region stays under threshold, and the healed test still fails on a known-bad build. Drop that third check and you grow a suite that heals into always passing.
+
+The shape is constant: the model proposes, a deterministic check disposes, every decision is scored. An LLM in your pipeline without a tracked veto rate is a faster way to ship false confidence.
+
+What does your team measure on AI triage accuracy?
+
+#SDET #TestAutomation #QAEngineering #LLM #Playwright
+
+---
+
+## Day 27 - 2026-07-13 - Testing LLM/AI systems: evals, non-determinism, prompt regression
+
+**The eval suite that passed while production broke**
+
+A prompt edit raised our support-bot refund-grant rate by about 9 points. No test failed. No alert fired. Finance caught it three weeks later in a reconciliation report.
+
+The cause was dull. Someone reworded the system prompt to sound warmer and moved a refund-eligibility rule out of the instructions into a few-shot example. Our eval suite was 140 input/output pairs with exact-match plus a few regex assertions. Warmth did not break exact-match. The refund logic did, but only on inputs absent from the golden set, because the failing population was a slice we never collected: angry customers outside the return window.
+
+The defect was in the eval design, not the prompt.
+
+What we changed.
+
+We stopped scoring single outputs and started scoring distributions. Each prompt version runs on the golden set at temperature 0 for the deterministic regression, then at production temperature with n=20 per case, and we track the policy-violation rate as a Wilson interval, not one sample. A change that lifts the upper bound of refund-grant rate past the budgeted threshold blocks the merge even when every output reads fine in isolation. At temp 0 you are inspecting one draw from a random variable and calling it the mean.
+
+We rebuilt the golden set from production failure clusters instead of happy paths. We embed real transcripts, cluster them (HDBSCAN), and oversample the tail. The warmth-versus-policy conflict cases became their own slice with their own threshold and their own owner.
+
+We added an LLM-as-judge with a rubric for refund-policy adherence, calibrated against human labels so we know its false-negative rate before trusting it, and pinned to a fixed model and version so the grader does not drift under us. We gate on the judge plus hard assertions, never the judge alone.
+
+promptfoo for the harness. Prompts are versioned like code, and we diff eval reports in the PR the same way we diff coverage.
+
+An eval suite that only checks the cases you already imagined is a confidence generator, not a safety net.
+
+#LLMTesting #QualityEngineering #AIEvaluation #SDET #MLOps
+
+---
+
+## Day 28 - 2026-07-14 - AI-driven development: testing AI-written code and agentic workflows
+
+**Your agent wrote the code and the tests that pass it**
+
+Most teams testing AI-written code in 2026 are measuring the wrong thing. They count whether the agent's diff passes the existing suite. That is backwards, because the agent also wrote the tests, and it wrote them to pass.
+
+The failure mode I keep hitting: an agent ships a feature plus a green test file, the PR is small and readable, CI is green, and three weeks later you find the test asserts the bug. Coverage went up, confidence went down, and the suite became a mirror of the implementation instead of an independent check.
+
+What catches this is the tooling that does not care who wrote the code.
+
+Mutation testing is the sharpest instrument. Run Stryker or mutmut against agent-authored tests specifically. If the score holds on human PRs and craters on agent ones, the tests are tautological, and you gate on that per-PR delta instead of a global threshold nobody agrees on.
+
+Property-based testing (Hypothesis, fast-check) moves the burden. You write the invariant, the agent writes the code, and the framework hunts the counterexample. Agents satisfy the examples in front of them and fail a universally quantified claim. That gap is where the defects sit.
+
+For agentic changes that cross service boundaries, pin the contract first. Pact plus can-i-deploy means a refactor that quietly reshapes a response gets blocked at the broker, not paged at 2am.
+
+Caveats. Mutation runs are slow, so scope them to changed files with test impact analysis or they die in your merge queue. Property tests need a real oracle, and "no exception thrown" is not one; encode a model or known-good reference.
+
+The reviewer is still the load-bearing part. The tooling only makes it harder to approve something never actually checked.
+
+What are you gating agent PRs on that you would skip for human ones?
+
+#SDET #TestAutomation #MutationTesting #QualityEngineering #AICodeReview
+
+---
+
+## Day 29 - 2026-07-15 - Flaky-test management at scale: detection, quarantine, attribution
+
+**Flaky tests: attribution is the hard part**
+
+Most flaky-test tooling fails at attribution, not detection. Detection is cheap: rerun a failure N times, and if the verdict flips on the same SHA, flag it. The expensive question is "whose change, which layer, what root cause" before the signal rots.
+
+Retry plugins (pytest-rerunfailures, Playwright retries, Surefire reruns) are a trap at scale. They hide flakiness inside green builds, so flake rate trends to zero while mean-time-to-merge climbs. If you keep retries, emit a flaky-pass event per attempt to your warehouse. A build that needed three tries is not green.
+
+CI-native dashboards (CircleCI, Buildkite analytics) give per-test history cheaply, but they key on test identity, not failure signature. Two unrelated races in one test look identical, so you cannot cluster and triage stays manual.
+
+Dedicated platforms (Datadog Test Optimization, Trunk, Develocity) earn their cost only when wired to attribution: do they fingerprint the stack trace and assertion delta so failures auto-cluster, and bisect the merge queue to name the introducing commit?
+
+The model that has held up for me:
+
+  detect: rerun on failure, same SHA, record every attempt
+  fingerprint: hash(normalized stack + assertion type + failing host class)
+  quarantine: auto-skip above a per-test flake budget, file the ticket, run in a non-blocking lane
+  attribution: cluster by fingerprint, bisect, route to the owner of the introducing diff
+
+The quarantine lane is the part teams skip. A quarantined test you stop running is a deleted test with extra steps. Keep it off the critical path so you see the moment it goes stable, and expire it so nothing rots.
+
+Watch this instead of raw flake rate: percent of failed pipelines a human classified by hand. If attribution works, it drops even when flake count does not.
+
+#SDET #TestAutomation #FlakyTests #ContinuousIntegration #QualityEngineering
+
+---
+
+## Day 30 - 2026-07-16 - Test impact analysis and CI test selection
+
+**Test impact analysis stops scaling, and selection is rarely the cause**
+
+Test impact analysis pays off fastest at small scale, then quietly degrades, and the cause is almost never the selection algorithm.
+
+The first version is trivial. Map changed files to tests via coverage data, run the subset, fall back to the full suite on config or lockfile changes. On a single repo with a clean module graph you cut maybe 80% of CI minutes in a week and everyone celebrates. Then you scale, and the failures hide where nobody put them on the roadmap.
+
+Start with the dependency graph being a lie. A static import graph misses the edges that carry the real risk: a feature flag read at runtime, a shared pytest fixture, a JSON contract two services agree on out of band, an ORM loading SQL by string. TIA on imports gets more confident and more wrong as the system grows. The answer is not a smarter graph. Treat selection as probabilistic. Keep per-test failure history keyed by changed path, decay it over time, and widen the set when predicted confidence drops below a threshold. Precision is a tuning knob with a recall floor.
+
+Coverage collection then becomes the bottleneck. Per-test coverage at monorepo scale writes gigabytes per run, and the instrumentation tax can swallow the time you saved. Teams that stall here stalled on write throughput and storage, not selection logic. Sampling with a staleness window beats chasing exactness.
+
+Flakes poison the loop last. A quarantined test that would have failed looks identical to one correctly excluded. Without attribution splitting regressions from flakes, one missed bug burns trust and the org reverts to run-everything.
+
+The defensible design: select hard on PRs, run the full suite on merge to main, and budget for being wrong. The escape hatch is the feature.
+
+Which stalled your rollout, the graph or the plumbing?
+
+#TestImpactAnalysis #CITestSelection #SDET #TestInfrastructure #ContinuousIntegration
 
 ---
 
