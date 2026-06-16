@@ -17,6 +17,7 @@ import logging
 import os
 import sys
 
+from . import notify
 from .config import Config, ConfigError
 from .content import assemble, generate_post
 from .images import generate_image
@@ -227,17 +228,21 @@ def run(argv: list[str] | None = None) -> int:
         post_id = _publish(cfg, log, content, image)
     except LinkedInAuthError as exc:
         log.error(str(exc))
+        notify.relogin_needed(str(exc))   # API token expired -> needs re-auth
         return 2
     except LinkedInError as exc:
         log.error("Publishing failed: %s", exc)
+        notify.post_failed(str(exc))
         return 1
     except Exception as exc:  # noqa: BLE001 - browser backend raises its own error types
         from .browser import NotLoggedInError
 
         if isinstance(exc, NotLoggedInError):
             log.error(str(exc))  # session needs a re-login
+            notify.relogin_needed(str(exc))
             return 2
         log.error("Publishing failed: %s", exc)
+        notify.post_failed(str(exc))
         return 1
 
     log.info("Published successfully via %s backend. Post ref: %s", cfg.post_backend, post_id)
