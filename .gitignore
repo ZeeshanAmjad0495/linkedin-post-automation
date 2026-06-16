@@ -1,0 +1,18 @@
+# Secrets — never commit
+.env
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Runtime artifacts
+logs/
+out/
+
+# Browser backend session profile — holds live LinkedIn cookies. NEVER commit.
+browser_profile/
+
+# Local runtime state (posted history etc.) — keep it out of the repo so a clone
+# starts fresh. The state/ dir is preserved by state/.gitkeep.
+state/*.json
